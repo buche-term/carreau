@@ -5,6 +5,9 @@
 // the mode sticky: it then lasts until the activation key (or Escape) is pressed again.
 // While in navigation mode, plain keys (with the activation modifier held or not) run
 // actions. Nothing is hard-coded: the activation chord and all bindings come from the config.
+//
+// A host with its own key handling can drive the mode instead: construct the controller
+// with no target (no keys are listened for), then `setMode` (and `run` for the actions).
 
 import { LayoutNode, PaneNode, Side } from "./model";
 import { View } from "./view";
@@ -81,7 +84,7 @@ export interface NavConfig {
    * `side` restricts which physical modifier key counts: "left", "right", or "either"
    * (default). E.g. "left" leaves the right Option key free for typing special characters.
    */
-  activation: { modifier: Modifier; code: string; side?: "left" | "right" | "either" };
+  activation?: { modifier: Modifier; code: string; side?: "left" | "right" | "either" };
   /**
    * Bindings while in navigation mode. Keys are chords of `KeyboardEvent.code` with optional
    * `Shift+`, `Alt+`, `Ctrl+`, `Meta+` prefixes (in that order), *not* counting the activation
@@ -197,8 +200,10 @@ export class KeyboardNav {
     readonly ws: Workspace,
     readonly view: View,
     readonly config: NavConfig,
-    target: Window = window,
+    /** Where keys are listened for; null: none (the host drives the mode, see `setMode`). */
+    target: Window | null = window,
   ) {
+    if (!target) return;
     target.addEventListener("keydown", (e) => this.keydown(e), { capture: true });
     target.addEventListener("keyup", (e) => this.keyup(e), { capture: true });
     // A modifier released while the window had no focus never sends keyup.
@@ -218,7 +223,7 @@ export class KeyboardNav {
    * `Lifecycle.commitFocus`), unless `commit` is false. Entering it takes the keyboard focus
    * back from an iframe (the keys were forwarded from it: see `bridgeFrameKeys`).
    */
-  private setMode(mode: NavMode, commit = true): void {
+  setMode(mode: NavMode, commit = true): void {
     if (mode === "off") this.clearPrefix();
     if (mode === this.mode) return;
     const was = this.mode;
@@ -244,6 +249,7 @@ export class KeyboardNav {
 
   /** Whether the activation modifier is held, on the configured side. */
   private modifierHeld(e: KeyboardEvent): boolean {
+    if (!this.config.activation) return false;
     const { modifier, side = "either" } = this.config.activation;
     if (!e[MOD_FLAG[modifier]]) return false;
     if (side === "either") return true;
@@ -254,6 +260,7 @@ export class KeyboardNav {
 
   /** Whether a key event is for the activation modifier key on the configured side. */
   private isActivationModifierKey(e: KeyboardEvent): boolean {
+    if (!this.config.activation) return false;
     const { modifier, side = "either" } = this.config.activation;
     if (e.key !== modifier) return false;
     return side === "either" || e.code === modifier + (side === "left" ? "Left" : "Right");
@@ -261,7 +268,7 @@ export class KeyboardNav {
 
   /** The chord of a key event, leaving out the activation modifier. */
   chord(e: KeyboardEvent): string {
-    const mod = this.config.activation.modifier;
+    const mod = this.config.activation?.modifier;
     return [
       e.shiftKey && mod !== "Shift" && "Shift",
       e.altKey && mod !== "Alt" && "Alt",
@@ -275,6 +282,8 @@ export class KeyboardNav {
 
   private keydown(e: KeyboardEvent): void {
     const { activation } = this.config;
+    // (No activation chord: only the shortcuts.)
+    if (!activation) return this.shortcut(e, isTextField(e.target as HTMLElement | null));
     if (/^(Alt|Control|Meta|Shift)(Left|Right)$/.test(e.code)) this.heldMods.add(e.code);
     // Typing in a text field is not navigation. But in the workspace's own fields (e.g. a
     // title being edited), the activation chord still works: that's the way out of them.

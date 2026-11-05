@@ -118,9 +118,10 @@ ln -sfn ../../carreau node_modules/carreau   # (target is relative to node_modul
 
 Since the host compiles carreau's sources, that is all: every save goes straight into
 the host's next bundle (buche's `bun run view` re-bundles on carreau source changes;
-`bun run electron --watch` refreshes `dist/electron` for the **next** window and leaves
-running ones alone). The host imports exactly what it will import from a tag — same
-entry points, same sources.
+`BUCHE_CARREAU_WATCH=1 bun run electron` refreshes `dist/electron` for the **next**
+window and leaves running ones alone — an env var rather than a flag, so the
+production entry stays free of dev switches). The host imports exactly what it will
+import from a tag — same entry points, same sources.
 
 ## License
 
