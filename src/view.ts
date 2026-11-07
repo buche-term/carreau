@@ -238,6 +238,8 @@ export class View implements DndHost {
   private navMode: "off" | "held" | "sticky" = "off";
   private menu: HTMLElement | null = null;
   private menuAnchor: HTMLElement | null = null;
+  /** Panes whose tab bar is collapsed (the ▾/▴ on the bar; view state, see `fillTabBar`). */
+  private collapsedBars = new Set<string>();
   /** One persistent element per tab, by tab id. */
   private contents = new Persistent();
   /** Other persistent elements, for renderers (`persist`). */
@@ -355,6 +357,21 @@ export class View implements DndHost {
       },
       { capture: true },
     );
+    // Right click on a pane itself (not one of its tabs, which have their own menu, not its
+    // content, which keeps its own): the pane's menu, the one its ⋯ opens, at the cursor. (A
+    // pane nested inside some content is chrome again. Iframes never bubble a right click.)
+    this.el.addEventListener("contextmenu", (e) => {
+      const t = e.target as HTMLElement;
+      const paneEl = t.closest<HTMLElement>(".carreau-pane");
+      if (!paneEl || t.closest(".carreau-tab") || t.closest(".carreau-float")) return;
+      const content = t.closest(".carreau-content");
+      if (content && !content.contains(paneEl)) return;
+      const node = this.ws.node(paneEl.dataset.id!);
+      if (node?.type !== "pane") return;
+      e.preventDefault();
+      const b = this.el.getBoundingClientRect();
+      this.openMenu(node, { left: e.clientX - b.left, top: e.clientY - b.top });
+    });
     // A change of the selection alone restyles; anything else renders (in place).
     ws.onChange((kind) => (kind === "selection" ? this.refreshSelection() : this.render()));
     new ResizeObserver(() => {
@@ -901,9 +918,23 @@ export class View implements DndHost {
     });
     const scroller = wrap.firstElementChild as HTMLElement;
     const kids: HTMLElement[] = [];
+    // The fold button, at the bar's left: ▾ collapses the bar to its 2px — what's left is the
+    // tabs' top line, the active tab's highlight marking the pane's bottom edge. Collapsed, the
+    // button becomes a right triangle over the pane's corner (in the active tab's accent) that
+    // brings the bar back. The tabs stay in the bar either way: the shortcuts keep working.
+    const collapsed = this.collapsedBars.has(node.id);
+    const fold = this.parts.get(`fold:${node.id}`, data, (cur) => {
+      const fold = div("carreau-tabbar-fold");
+      fold.addEventListener("pointerdown", (e) => e.stopPropagation());
+      fold.addEventListener("click", () => this.collapseTabBar(cur().node.id));
+      return fold;
+    });
+    fold.textContent = collapsed ? "" : "▾";
+    setAttr(fold, "title", collapsed ? "Expand the tab bar" : "Collapse the tab bar");
+    kids.push(fold);
     // Its name, if it has one: left of the tabs (double-click: edit it). It's a handle, like the
     // header's empty part.
-    if (node.name) {
+    if (node.name && !collapsed) {
       const name = this.parts.get(`pane-name:${node.id}`, data, (cur) => {
         const name = span("carreau-pane-name");
         name.addEventListener("pointerdown", (e) => this.dnd.arm(e, { kind: "pane", paneId: cur().node.id }, cur().node.name ?? "pane", cur().paneEl));
@@ -916,28 +947,38 @@ export class View implements DndHost {
     }
     kids.push(wrap);
     // The empty part of the header moves the pane.
-    kids.push(
-      this.parts.get(`tabspace:${node.id}`, data, (cur) => {
-        const space = div("carreau-tabspace");
-        space.title = "Drag to move this pane";
-        space.addEventListener("pointerdown", (e) => {
-          const { node, paneEl } = cur();
-          this.dnd.arm(e, { kind: "pane", paneId: node.id }, node.tabs[node.active]?.title ?? node.name ?? "pane", paneEl);
-        });
-        return space;
-      }),
-    );
-    if (!ctx.floating)
+    if (!collapsed)
+      kids.push(
+        this.parts.get(`tabspace:${node.id}`, data, (cur) => {
+          const space = div("carreau-tabspace");
+          space.title = "Drag to move this pane";
+          space.addEventListener("pointerdown", (e) => {
+            const { node, paneEl } = cur();
+            this.dnd.arm(e, { kind: "pane", paneId: node.id }, node.tabs[node.active]?.title ?? node.name ?? "pane", paneEl);
+          });
+          return space;
+        }),
+      );
+    if (!ctx.floating && !collapsed)
       // "More" button at the right end: opens the pane menu.
       kids.push(
         this.parts.get(`more:${node.id}`, data, (cur) => {
           const more = Object.assign(div("carreau-more"), { title: "Pane options", textContent: "⋯" });
           more.addEventListener("pointerdown", (e) => e.stopPropagation());
-          more.addEventListener("click", () => (this.menuAnchor === more ? this.closeMenu() : this.openMenu(more, cur().node)));
+          more.addEventListener("click", () => {
+            if (this.menuAnchor === more) this.closeMenu();
+            else {
+              // The header is at the bottom of panes: open upwards, from the button.
+              const g = more.getBoundingClientRect();
+              const b = this.el.getBoundingClientRect();
+              this.openMenu(cur().node, { right: b.right - g.right, bottom: b.bottom - g.top + 2 }, more);
+            }
+          });
           return more;
         }),
       );
     syncChildren(bar, kids);
+    bar.classList.toggle("collapsed", collapsed);
     const tabs: HTMLElement[] = [];
     node.tabs.forEach((t, i) => {
       // Merged tabs (a complex): a link icon between them, which drags the whole complex.
@@ -956,6 +997,17 @@ export class View implements DndHost {
       tabs.push(this.renderTab(node, t, i, ctx));
     });
     syncChildren(scroller, tabs);
+  }
+
+  /** Collapse a pane's tab bar, or bring it back (its ▾/▴). While collapsed, the bar keeps its
+   *  2px: the tabs' top line — the active tab's highlight, on the pane's bottom edge — and the
+   *  ▴ in the corner; the tabs are still there, so the tab shortcuts keep working. */
+  collapseTabBar(paneId: string): void {
+    if (this.collapsedBars.delete(paneId)) this.render();
+    else {
+      this.collapsedBars.add(paneId);
+      this.render();
+    }
   }
 
   /** A tab: [icon][short][×]. The status changes how the icon looks (see the CSS). */
@@ -1152,8 +1204,12 @@ export class View implements DndHost {
   // -------------------------------------------------------------------------
   // Pane menu, in-place editing, navigation mode
 
-  /** The pane menu (its ⋯ button). */
-  private openMenu(anchor: HTMLElement, node: PaneNode): void {
+  /**
+   * The pane menu (its ⋯ button, and right click on the pane itself). `anchor`: the button
+   * that opened it (it toggles it, and the menu opens above it); without one, the menu opens
+   * at `at`.
+   */
+  private openMenu(node: PaneNode, at: { left?: number; top?: number; right?: number; bottom?: number }, anchor?: HTMLElement): void {
     const items: MenuItem[] = [
       { label: "Float", enabled: panes(this.ws.root).length > 1 && !!find(this.ws.root, node.id), run: () => this.floatPane(node.id) },
     ];
@@ -1167,10 +1223,7 @@ export class View implements DndHost {
     items.push({ label: node.name ? "Rename pane…" : "Name pane…", run: () => this.editPaneName(node.id) });
     if (node.name) items.push({ label: "Remove name", run: () => this.ws.namePane(node.id, null) });
     items.push({ label: "Send to", sendTo: node.id });
-    // The header is at the bottom of panes: open upwards.
-    const g = anchor.getBoundingClientRect();
-    const b = this.el.getBoundingClientRect();
-    this.showMenu(items, { right: b.right - g.right, bottom: b.bottom - g.top + 2 }, anchor);
+    this.showMenu(items, at, anchor);
   }
 
   /** A tab's menu (right click): close it, send it somewhere, collapse its group. */
@@ -1235,11 +1288,19 @@ export class View implements DndHost {
     for (const name of names) sub.append(button(name, this.ws.canSendTo(id, name), () => this.ws.sendTo(id, name), "carreau-menu-name"));
     if (!names.length) sub.append(Object.assign(document.createElement("div"), { className: "carreau-menu-note", textContent: "No named panes" }));
     row.append(sub);
-    // Open on the side where there's room.
+    // Hover intent: once the submenu is open, it closes a beat after the pointer leaves the item
+    // (submenu included) — however slowly or crookedly the pointer is on its way, it arrives
+    // before the submenu goes away. (Items and submenu are flush, but a diagonal path can still
+    // cross a neighbouring item on the way.) Open on the side where there's room.
+    let timer: ReturnType<typeof setTimeout> | null = null;
     row.addEventListener("pointerenter", () => {
-      sub.classList.remove("to-right");
-      const r = sub.getBoundingClientRect();
-      if (r.left < this.el.getBoundingClientRect().left) sub.classList.add("to-right");
+      if (timer) clearTimeout(timer);
+      row.classList.add("open");
+      row.classList.remove("to-right");
+      if (sub.getBoundingClientRect().left < this.el.getBoundingClientRect().left) row.classList.add("to-right");
+    });
+    row.addEventListener("pointerleave", () => {
+      timer = setTimeout(() => row.classList.remove("open"), 400);
     });
     return row;
   }

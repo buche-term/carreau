@@ -526,6 +526,46 @@ for (const [a, b] of [["swapUp", "swapDown"], ["swapLeft", "swapRight"], ["swapR
   check(`placer: moves an existing tab: ${titles(ws)}`, titles(ws) === "row(column(A+C, D), column(B, E))");
   check("placer: undoable", (ws.undo(), titles(ws) === "row(column(A, D), column(B, row(C, E)))"));
 }
+// left/right at a window's edge: the next window (the main one, then the floats by x, cycling)
+{
+  const focused = (ws) => { const n = ws.node(ws.selection.id); return n?.type === "pane" ? n.tabs[n.active].title : `(${n?.type})`; };
+  const find = (ws, t) => [ws.root, ...ws.floating.map((w) => w.root)].flatMap((r) => panes(r)).find((p) => p.tabs.some((x) => x.title === t));
+  const ws = new Workspace(row([pane(["A"]), pane(["B"]), pane(["C"])]));
+  ws.float(find(ws, "A").id, { x: 300, y: 0, w: 200, h: 100 }); // floated first, but furthest right
+  ws.float(find(ws, "C").id, { x: 100, y: 0, w: 200, h: 100 });
+  ws.select({ id: find(ws, "B").id });
+  const seq = [];
+  for (let i = 0; i < 5; i++) { ws.run("focusRight"); seq.push(focused(ws)); }
+  check(`right, at the main window's edge: the floats by x, cycling: ${seq}`, seq.join(" ") === "C A B C A");
+  seq.length = 0;
+  for (let i = 0; i < 3; i++) { ws.run("focusLeft"); seq.push(focused(ws)); }
+  check(`…and left: ${seq}`, seq.join(" ") === "C B A");
+  ws.select({ id: find(ws, "B").id });
+  ws.run("focusUp");
+  check("up/down don't cross windows", focused(ws) === "B");
+  // landing on a window: the component at the edge we enter through, the one facing the middle
+  const ws2 = new Workspace(pane(["M"]));
+  ws2.load({ root: ws2.root, floating: [{ root: column([pane(["T"], 3), pane(["Bo"])]), rect: { x: 50, y: 0, w: 200, h: 100 } }] });
+  ws2.select({ id: find(ws2, "M").id });
+  ws2.run("focusRight");
+  check("…and it's a pane, not the split around it", focused(ws2) === "T");
+  ws2.run("focusUp");
+  check("…within the float, up stays within it", focused(ws2) === "T");
+  ws2.run("focusLeft");
+  check("…back across the other edge", focused(ws2) === "M");
+  const ws3 = new Workspace(row([pane(["A"]), pane(["B"])]));
+  ws3.select({ id: panes(ws3.root)[1].id });
+  ws3.run("focusRight");
+  check("no floats: at the edge, the focus stays", focused(ws3) === "B");
+  // a floated pane's remembered way back (the boundary) is in the tree it left: stale, ignored
+  const ws4 = new Workspace(row([pane(["A"]), pane(["B"]), pane(["C"])]));
+  ws4.select({ id: find(ws4, "C").id });
+  ws4.run("focusLeft"); // → B, which now remembers its way back: C
+  ws4.float(ws4.selection.id, { x: 100, y: 0, w: 200, h: 100 }); // B floats out, C stays behind
+  let threw = false;
+  try { ws4.run("focusRight"); } catch { threw = true; }
+  check(`a floated pane's stale boundary is ignored: right crosses to the main window's left`, !threw && focused(ws4) === "A");
+}
 // spawn: the focused cell decides what the new cell is
 {
   const ws = new Workspace(row([pane(["A"]), pane(["B"])]));

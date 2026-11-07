@@ -1543,8 +1543,18 @@ export class Workspace {
     if (this.clearMultiSelection()) return;
     const sel = this.selection;
     const target = this.neighbour(side);
-    if (!target) return;
-    this.boundary.set(`${target.id}:${opposite[side]}`, sel);
+    if (target) this.boundary.set(`${target.id}:${opposite[side]}`, sel);
+    else {
+      // Nothing on that side within this window: at its left/right edge, the next window
+      // takes us instead. (The boundary map is one window's geometry: stay out of it.)
+      if (sideAxis[side] !== "row") return;
+      const across = this.nextWindow(side);
+      if (!across) return;
+      this.select(across, false);
+      this.followMaximized();
+      this.emit("selection");
+      return;
+    }
     this.select(target, false);
     this.followMaximized();
     this.emit("selection");
@@ -1581,9 +1591,10 @@ export class Workspace {
     const overlap = (r: Rect) =>
       horizontal ? Math.min(r.y + r.h, S.y + S.h) - Math.max(r.y, S.y) : Math.min(r.x + r.w, S.x + S.w) - Math.max(r.x, S.x);
 
-    // 1. Back where we came from through this boundary, if still valid.
+    // 1. Back where we came from through this boundary, if still valid. In this tree: a
+    // floated pane's boundary pointing back into the tree it left (or the reverse) is stale.
     const remembered = this.boundary.get(`${sel.id}:${side}`);
-    const rn = remembered && this.node(remembered.id);
+    const rn = remembered && find(tree, remembered.id)?.node;
     if (remembered && rn && (only === "any" || (!remembered.range && (only === "nodes" || rn.type === "pane")))) {
       const r = this.selectionRect(remembered, rects);
       if (adjacent(r) && overlap(r) > EPS) return remembered;
@@ -1603,6 +1614,41 @@ export class Workspace {
       const score = ov + (lo <= center && center < hi ? 10 : 0);
       if (!best || score > best.score) best = { id: p.id, score };
     }
+    return best && { id: best.id };
+  }
+
+  /**
+   * Left/right at a window's edge (where `neighbour` finds nothing): the next window, the
+   * windows being the main one then the floating ones by x, cycling. We land on the component
+   * at the edge we enter through (arriving from the left, its leftmost one): a pane when
+   * there is one there, the biggest, the one facing the window's middle first.
+   */
+  private nextWindow(side: Side): Selection | null {
+    const roots = [this.root, ...[...this.floating].sort((a, b) => a.rect.x - b.rect.x).map((w) => w.root)];
+    if (roots.length < 2) return null;
+    const root = this.tree();
+    const i = roots.findIndex((r) => r.id === root.id);
+    const to = roots[(i + (side === "right" ? 1 : -1) + roots.length) % roots.length]!;
+    if (to.id === root.id) return null;
+    const enter = opposite[side]; // heading right (left), we enter the window's left (right) edge
+    const rects = computeRects(to);
+    const R = rects.get(to.id);
+    if (!R) return null;
+    const edge = enter === "left" ? R.x : R.x + R.w;
+    const center = R.y + R.h / 2;
+    let pane: { id: string; score: number } | null = null;
+    let cell: { id: string; score: number } | null = null;
+    for (const { node: p } of walk(to)) {
+      if (!isCell(p) || (p.type === "pane" && !!activeGroup(p))) continue; // hidden, or a group's container
+      const r = rects.get(p.id);
+      if (!r || Math.abs((enter === "left" ? r.x : r.x + r.w) - edge) > EPS) continue;
+      const ov = Math.min(r.y + r.h, R.y + R.h) - Math.max(r.y, R.y);
+      if (ov <= EPS) continue;
+      const hit = { id: p.id, score: ov + (r.y <= center && center < r.y + r.h ? 10 : 0) };
+      if (!cell || hit.score > cell.score) cell = hit;
+      if (p.type === "pane" && (!pane || hit.score > pane.score)) pane = hit;
+    }
+    const best = pane ?? cell;
     return best && { id: best.id };
   }
 

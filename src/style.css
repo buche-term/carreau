@@ -39,6 +39,25 @@
 .carreau-tabs-wrap::after { right: 0; background: linear-gradient(to left, light-dark(#0002, #000c), transparent); }
 .carreau-tabs-wrap.more-left::before, .carreau-tabs-wrap.more-right::after { opacity: 1; }
 .carreau-tabspace { flex: 1 0 24px; cursor: grab; }
+/* The fold button (▾/▴), at the bar's left; collapsed, the bar is just the tabs' 2px top line
+   (the active tab's highlight, at the pane's bottom edge), and the ▴ waits in the bottom-left
+   corner, in the active tab's accent, to bring the bar back. */
+.carreau-tabbar-fold {
+  flex: none; display: flex; align-items: center; padding: 0 5px; cursor: pointer;
+  color: light-dark(#8a8d96, #80838d); font-size: 14px; line-height: 1;
+}
+.carreau-tabbar-fold:hover { color: light-dark(#1d1e22, #eee); }
+.carreau-tabbar.collapsed { position: relative; overflow: visible; height: 2px; flex-basis: 2px; }
+/* Nothing of the tabs is painted but their box (they keep their width: the active tab's inset
+   line, at the pane's bottom edge, marks it where it sits). */
+.carreau-tabbar.collapsed .carreau-tab > *, .carreau-tabbar.collapsed .carreau-tab-link { visibility: hidden; }
+.carreau-tabbar.collapsed .carreau-tabs-wrap::before, .carreau-tabbar.collapsed .carreau-tabs-wrap::after { display: none; }
+/* The collapsed fold: a right triangle over the pane's corner itself (its clip is its hit
+   area too), in the active tab's accent. */
+.carreau-tabbar.collapsed > .carreau-tabbar-fold {
+  position: absolute; left: 0; bottom: 0; width: 16px; height: 16px; padding: 0;
+  background: var(--focus-accent, light-dark(#8a8d96, #80838d)); clip-path: polygon(0 0, 0 100%, 100% 100%);
+}
 /* Every tab's text is faded except the selected one (active tab of the focused pane). The
    active tab of each pane has a line on the header's grey line: mid grey, or the tab's
    accent when its pane is focused. */
@@ -139,21 +158,25 @@
 
 /* pane menu */
 .carreau-menu, .carreau-submenu {
-  position: absolute; z-index: 30; display: flex; flex-direction: column; min-width: 110px; padding: 4px;
+  position: absolute; z-index: 30; display: flex; flex-direction: column; min-width: 110px; padding: 4px 0;
   background: light-dark(#ffffff, #2a2c36); border: 1px solid light-dark(#d3d6de, #3a3d4a); border-radius: 6px; box-shadow: 0 6px 20px light-dark(#0003, #0009);
 }
+/* Items take the menu's whole width (no side padding: the buttons have their own): an item's
+   hover zone reaches the menu's edge, and its submenu touches it — no pixel in between. */
 .carreau-menu button {
   all: unset; padding: 4px 10px; border-radius: 4px; color: light-dark(#222, #ddd); cursor: pointer; font-size: 12px;
 }
 .carreau-menu button:hover:not(:disabled) { background: light-dark(#eceef3, #3a3e4e); }
 .carreau-menu button:disabled { color: light-dark(#aaa, #666); cursor: default; }
-/* "Send to": a submenu, on hover (on the side where there's room): the four sides, then names */
+/* "Send to": a submenu, on hover (on the side where there's room): the four sides, then names.
+   It stays open a beat after the pointer leaves (see `sendToItem`), so a slow or crooked path
+   still gets there. */
 .carreau-menu-sub { position: relative; display: flex; flex-direction: column; }
-.carreau-submenu { display: none; right: 100%; bottom: -4px; margin-right: 4px; min-width: 120px; }
-.carreau-submenu.to-right { right: auto; left: 100%; margin-right: 0; margin-left: 4px; }
-.carreau-menu-sub:hover > .carreau-submenu { display: flex; }
-.carreau-menu-sub:hover > .carreau-menu-subtitle { background: light-dark(#eceef3, #3a3e4e); }
-.carreau-menu-arrows { display: flex; gap: 2px; padding-bottom: 3px; margin-bottom: 3px; border-bottom: 1px solid light-dark(#e3e5ea, #3a3d4a); }
+.carreau-submenu { display: none; right: 100%; bottom: -4px; min-width: 120px; }
+.carreau-menu-sub.open > .carreau-submenu { display: flex; }
+.carreau-menu-sub.open > .carreau-menu-subtitle { background: light-dark(#eceef3, #3a3e4e); }
+.carreau-menu-sub.to-right > .carreau-submenu { right: auto; left: 100%; }
+.carreau-menu-arrows { display: flex; gap: 2px; padding-bottom: 3px; margin: 0 4px 3px; border-bottom: 1px solid light-dark(#e3e5ea, #3a3d4a); }
 .carreau-menu .carreau-menu-arrow { flex: 1; text-align: center; padding: 4px 0; font-size: 13px; }
 .carreau-menu-note { padding: 4px 10px; font-size: 12px; color: light-dark(#999, #777); font-style: italic; }
 /* marks (stored selections): a numbered badge, on the tab, the pane's tab bar, or a cell's strip */
