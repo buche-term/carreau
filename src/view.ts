@@ -237,6 +237,7 @@ export class View implements DndHost {
   readonly floatLayer: HTMLElement;
   readonly overlay: SVGSVGElement;
   private selBox: HTMLElement;
+  private restoreBtn: HTMLElement;
   private opts: Required<Pick<ViewOptions, "renderTab">> & ViewOptions;
   readonly dnd: DragDrop;
   /** Navigation mode (driven by the keyboard controller). */
@@ -319,10 +320,15 @@ export class View implements DndHost {
     this.el = div("carreau");
     this.rootEl = div("carreau-root");
     this.selBox = div("carreau-selection");
+    // Maximization's way back: a corner button, shown while maximized (CSS), restoring on
+    // click (double-clicking the pane's tab does it too). Above the windows: always clickable.
+    this.restoreBtn = div("carreau-restore");
+    this.restoreBtn.title = "Unmaximize";
+    this.restoreBtn.addEventListener("click", () => this.ws.restore());
     this.floatLayer = div("carreau-floats");
     this.overlay = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     this.overlay.classList.add("carreau-overlay");
-    this.el.append(this.rootEl, this.selBox, this.floatLayer, this.overlay);
+    this.el.append(this.rootEl, this.selBox, this.floatLayer, this.overlay, this.restoreBtn);
     this.dnd = new DragDrop(this);
     host.append(this.el);
 
