@@ -45,7 +45,12 @@ export interface ViewOptions {
 }
 
 /** A menu's item: an action, or a "Send to" submenu (for a tab or a pane, by id). */
-type MenuItem = { label: string; enabled?: boolean; run: () => void } | { label: string; sendTo: string };
+type MenuButton = (label: string, enabled: boolean, run: () => void, cls?: string) => HTMLButtonElement;
+type MenuItem =
+  | { label: string; enabled?: boolean; run: () => void }
+  | { label: string; sendTo: string }
+  /** A submenu row: `sub` fills its body (`button`: make a menu button). */
+  | { label: string; sub: (sub: HTMLElement, button: MenuButton) => void };
 
 /** How the view renders a leaf node type other than panes (see `registerRenderer`). */
 export interface NodeRenderer {
@@ -358,12 +363,15 @@ export class View implements DndHost {
       { capture: true },
     );
     // Right click on a pane itself (not one of its tabs, which have their own menu, not its
-    // content, which keeps its own): the pane's menu, the one its ⋯ opens, at the cursor. (A
-    // pane nested inside some content is chrome again. Iframes never bubble a right click.)
+    // content, which keeps its own, not a floating window's own bar and handles): the pane's
+    // menu, the one its ⋯ opens, at the cursor. Anywhere the pane can be grabbed (its tab
+    // bar's empty space, its name, its long strip) is chrome like its body, inside a floating
+    // window too. (A pane nested inside some content is chrome again. Iframes never bubble a
+    // right click.)
     this.el.addEventListener("contextmenu", (e) => {
       const t = e.target as HTMLElement;
       const paneEl = t.closest<HTMLElement>(".carreau-pane");
-      if (!paneEl || t.closest(".carreau-tab") || t.closest(".carreau-float")) return;
+      if (!paneEl || t.closest(".carreau-tab") || t.closest(".carreau-float-bar, .carreau-float-resize")) return;
       const content = t.closest(".carreau-content");
       if (content && !content.contains(paneEl)) return;
       const node = this.ws.node(paneEl.dataset.id!);
@@ -1211,7 +1219,45 @@ export class View implements DndHost {
    */
   private openMenu(node: PaneNode, at: { left?: number; top?: number; right?: number; bottom?: number }, anchor?: HTMLElement): void {
     const items: MenuItem[] = [
+      // Everything new around this pane, what nav's `i` opens (it takes the focused cell:
+      // this pane takes it first). The arrows: a cell beside it on that side; Tab: one more
+      // of them in its own tabs; Float: one in a window of its own.
+      {
+        label: "New",
+        sub: (sub, button) => {
+          const arrows = Object.assign(document.createElement("div"), { className: "carreau-menu-arrows" });
+          for (const [side, glyph, name] of [
+            ["left", "←", "left"],
+            ["right", "→", "right"],
+            ["top", "↑", "up"],
+            ["bottom", "↓", "down"],
+          ] as const) {
+            const b = button(
+              glyph,
+              true,
+              () => {
+                this.ws.select({ id: node.id }, false);
+                this.ws.spawn({ split: side });
+              },
+              "carreau-menu-arrow",
+            );
+            b.title = `New cell to the ${name}`;
+            arrows.append(b);
+          }
+          sub.append(arrows);
+          const tab = button("Tab", true, () => this.ws.spawnTabInto(node.id));
+          tab.title = "A new tab in this pane";
+          sub.append(tab);
+          const float = button("Float", true, () => {
+            this.ws.select({ id: node.id }, false);
+            this.ws.spawnFloat(this.floatRect(node.id) ?? { x: 40, y: 40, w: 420, h: 280 });
+          });
+          float.title = "A new cell in a new floating window";
+          sub.append(float);
+        },
+      },
       { label: "Float", enabled: panes(this.ws.root).length > 1 && !!find(this.ws.root, node.id), run: () => this.floatPane(node.id) },
+      { label: "Group", run: () => this.groupAndName({ id: node.id }) },
     ];
     if (this.ws.canCollapse(node.id)) items.push({ label: "Collapse group", run: () => this.ws.collapse(node.id) });
     items.push({ label: "Close pane", enabled: this.ws.canClosePane(node.id), run: () => this.ws.closePane(node.id) });
@@ -1226,13 +1272,34 @@ export class View implements DndHost {
     this.showMenu(items, at, anchor);
   }
 
-  /** A tab's menu (right click): close it, send it somewhere, collapse its group. */
+  /**
+   * A tab's menu (right click): the tab's own things — a new tab in its pane, this tab out
+   * in a window, close it, rename it, send it somewhere, collapse its group.
+   */
   private openTabMenu(e: MouseEvent, node: PaneNode, t: Tab): void {
-    const items: MenuItem[] = [{ label: "Close tab", enabled: this.ws.canCloseTab(t.id), run: () => this.ws.closeTab(t.id) }];
-    items.push({ label: "Send to", sendTo: t.id });
+    const items: MenuItem[] = [
+      { label: "New tab", run: () => this.ws.spawnTabInto(node.id, t.id) },
+      {
+        label: "Float",
+        // The tab's pane is in the main tree, and pulling the tab out doesn't empty it (all
+        // of a lone pane's tabs float the pane itself, which the main tree cannot be).
+        enabled: !!find(this.ws.root, node.id) && (node.tabs.length > 1 || panes(this.ws.root).length > 1),
+        run: () => this.floatTab(node, t),
+      },
+      { label: "Close tab", enabled: this.ws.canCloseTab(t.id), run: () => this.ws.closeTab(t.id) },
+      { label: "Rename tab…", run: () => this.editTabTitle(t.id) },
+      { label: "Send to", sendTo: t.id },
+    ];
     if (t.group && this.ws.canCollapse(node.id)) items.push({ label: "Collapse group", run: () => this.ws.collapse(node.id) });
     const b = this.el.getBoundingClientRect();
     this.showMenu(items, { left: e.clientX - b.left, top: e.clientY - b.top });
+  }
+
+  /** Pull a tab out of its pane into a floating window of its own (all of a pane's tabs at
+   *  once float the pane itself, as a drop of them all does). */
+  private floatTab(node: PaneNode, t: Tab): void {
+    const result = this.ws.tryDrop({ kind: "tab", tabId: t.id }, { kind: "float", paneId: node.id });
+    if (result) this.ws.commitDrop(result, undefined, this.floatRect(node.id) ?? { x: 40, y: 40, w: 420, h: 280 });
   }
 
   /**
@@ -1253,7 +1320,8 @@ export class View implements DndHost {
     };
     for (const it of items) {
       if ("run" in it) menu.append(button(it.label, it.enabled !== false, it.run));
-      else menu.append(this.sendToItem(it.label, it.sendTo, button));
+      else if ("sendTo" in it) menu.append(this.sendToItem(it.label, it.sendTo, button));
+      else menu.append(this.subItem(it.label, button, (sub) => it.sub(sub, button)));
     }
     for (const [k, v] of Object.entries(at)) if (v !== undefined) menu.style.setProperty(k, `${v}px`);
     this.el.append(menu);
@@ -1268,30 +1336,39 @@ export class View implements DndHost {
   }
 
   /** A "Send to" item: its submenu (shown on hover) has the four sides, then the named panes. */
-  private sendToItem(label: string, id: string, button: (label: string, enabled: boolean, run: () => void, cls?: string) => HTMLButtonElement): HTMLElement {
+  private sendToItem(label: string, id: string, button: MenuButton): HTMLElement {
+    return this.subItem(label, button, (sub) => {
+      const arrows = Object.assign(document.createElement("div"), { className: "carreau-menu-arrows" });
+      for (const [side, glyph] of [["left", "←"], ["right", "→"], ["up", "↑"], ["down", "↓"]]) {
+        const b = button(glyph, this.ws.canSendTo(id, side), () => this.ws.sendTo(id, side), "carreau-menu-arrow");
+        b.title = `Send ${side}`;
+        arrows.append(b);
+      }
+      sub.append(arrows);
+      const names = this.ws
+        .trees()
+        .flatMap((t) => panes(t))
+        .filter((p) => p.name && p.id !== id && !p.tabs.some((x) => x.id === id))
+        .map((p) => p.name!)
+        .sort((a, b) => a.localeCompare(b));
+      for (const name of names) sub.append(button(name, this.ws.canSendTo(id, name), () => this.ws.sendTo(id, name), "carreau-menu-name"));
+      if (!names.length) sub.append(Object.assign(document.createElement("div"), { className: "carreau-menu-note", textContent: "No named panes" }));
+    });
+  }
+
+  /**
+   * A menu row that opens a submenu (shown on hover): `build` fills it. Hover intent: once
+   * open, the submenu closes a beat after the pointer leaves the row (submenu included) —
+   * however slowly or crookedly the pointer is on its way, it arrives before the submenu goes
+   * away. (Rows and submenu are flush, but a diagonal path can still cross a neighbouring
+   * item on the way.) Opens on the side where there's room.
+   */
+  private subItem(label: string, button: MenuButton, build: (sub: HTMLElement) => void): HTMLElement {
     const row = Object.assign(document.createElement("div"), { className: "carreau-menu-sub" });
     row.append(Object.assign(document.createElement("button"), { textContent: `${label}  ▸`, className: "carreau-menu-subtitle" }));
     const sub = Object.assign(document.createElement("div"), { className: "carreau-submenu" });
-    const arrows = Object.assign(document.createElement("div"), { className: "carreau-menu-arrows" });
-    for (const [side, glyph] of [["left", "←"], ["right", "→"], ["up", "↑"], ["down", "↓"]]) {
-      const b = button(glyph, this.ws.canSendTo(id, side), () => this.ws.sendTo(id, side), "carreau-menu-arrow");
-      b.title = `Send ${side}`;
-      arrows.append(b);
-    }
-    sub.append(arrows);
-    const names = this.ws
-      .trees()
-      .flatMap((t) => panes(t))
-      .filter((p) => p.name && p.id !== id && !p.tabs.some((x) => x.id === id))
-      .map((p) => p.name!)
-      .sort((a, b) => a.localeCompare(b));
-    for (const name of names) sub.append(button(name, this.ws.canSendTo(id, name), () => this.ws.sendTo(id, name), "carreau-menu-name"));
-    if (!names.length) sub.append(Object.assign(document.createElement("div"), { className: "carreau-menu-note", textContent: "No named panes" }));
+    build(sub);
     row.append(sub);
-    // Hover intent: once the submenu is open, it closes a beat after the pointer leaves the item
-    // (submenu included) — however slowly or crookedly the pointer is on its way, it arrives
-    // before the submenu goes away. (Items and submenu are flush, but a diagonal path can still
-    // cross a neighbouring item on the way.) Open on the side where there's room.
     let timer: ReturnType<typeof setTimeout> | null = null;
     row.addEventListener("pointerenter", () => {
       if (timer) clearTimeout(timer);

@@ -39,8 +39,9 @@ await page.waitForTimeout(100);
 console.log("model.ts sent to logs:", await bars());
 // ⋯ of "Outline" → Send to → ← (the whole pane, into the neighbour on the left).
 await paneOf("Outline").locator(".carreau-more").click();
-await page.locator(".carreau-menu-subtitle").hover();
-await page.locator(".carreau-submenu button", { hasText: "←" }).click();
+const sendTo = page.locator(".carreau-menu-sub", { has: page.locator(".carreau-menu-subtitle", { hasText: "Send to" }) });
+await sendTo.locator(".carreau-menu-subtitle").hover();
+await sendTo.locator(".carreau-submenu button", { hasText: "←" }).click();
 await page.waitForTimeout(100);
 console.log("Outline's pane sent ←:", await bars());
 await page.evaluate(() => window.ws.undo());

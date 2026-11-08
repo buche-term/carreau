@@ -807,12 +807,42 @@ export class Workspace {
     }, null);
   }
 
+  /**
+   * Like `spawn` (the host's `lifecycle.spawn` decides what the cell is), but appended to
+   * `paneId`'s OWN tabs: that pane itself, not what it absorbs — a pane that is a stream's
+   * cell absorbs beside it in the stream, but a new tab of that pane is about the pane and
+   * its tabs. It copies `fromId` (default: the pane's active tab) and lands just after it.
+   * Undoable; the new tab gets the focus.
+   */
+  spawnTabInto(paneId: string, fromId?: string): Cell | null {
+    const pane = this.node(paneId);
+    if (pane?.type !== "pane") return null;
+    let i = pane.active;
+    if (fromId !== undefined) {
+      const j = pane.tabs.findIndex((t) => t.id === fromId);
+      if (j >= 0) i = j;
+    }
+    const from = pane.tabs[i];
+    if (!from) return null;
+    const tab = this.newTab(from);
+    if (!tab) return null;
+    const subject = this.subjectOf(tab);
+    const result = subject && this.tryDrop(subject, { kind: "tab", paneId, index: i + 1 });
+    if (!result) return null;
+    this.commitDrop(result);
+    return this.cell(result.paneId);
+  }
+
   /** The new cell the focused one creates (`lifecycle.spawn`; a split: its most recent pane's). */
   private spawnTab(): Tab | null {
     const sel = this.node(this.selection.id);
     const pane = sel && this.node(sel.type === "pane" ? sel.id : this.descend(sel));
     const from = pane?.type === "pane" ? pane.tabs[pane.active] : undefined;
-    if (!from) return null;
+    return from ? this.newTab(from) : null;
+  }
+
+  /** What `lifecycle.spawn` makes of a tab (a plain new tab, with no host). */
+  private newTab(from: Tab): Tab | null {
     return this.lifecycle.spawn ? this.lifecycle.spawn(from) : { id: genId("t"), title: "New tab" };
   }
 

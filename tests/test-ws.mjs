@@ -960,6 +960,18 @@ for (const [a, b] of [["swapUp", "swapDown"], ["swapLeft", "swapRight"], ["swapR
   ws.select({ id: byTitle(ws, "c2").id });
   ws.spawn({ split: "tab" });
   check(`insert into c2 (a cell): a new cell just after it: ${cells(ws)}`, cells(ws) === "c1,c2,c2',c3" && ws.node(ws.selection.id).tabs[0].title === "c2'");
+  // …but the pane's OWN new tab (spawnTabInto, the pane menu's New → Tab) is the pane's, not the
+  // stream's: the pane and its tabs are separate entities from the cell nav conflates.
+  ws = mk();
+  ws.lifecycle = { ...ws.lifecycle, spawn: (from) => ({ id: "t" + from.title + "'", title: from.title + "'" }) };
+  ws.spawnTabInto(byTitle(ws, "c2").id);
+  check(`new tab in c2 (a stream cell): its own tabs: ${cells(ws)}`, cells(ws) === "c1,c2+c2',c3" && ws.node(ws.selection.id).tabs[1].title === "c2'");
+  // and from a given tab, just after it (the tab menu's New tab, whatever tab was clicked).
+  const lpane = () => panes(ws.root).find((p) => p.tabs.some((x) => x.title === "L2"));
+  const lp = lpane();
+  ws.spawnTabInto(lp.id, lp.tabs[1].id);
+  const lt = lpane().tabs.map((x) => x.title).join("+");
+  check(`new tab after L2 (the tab menu's clicked tab): ${lt}`, lt === "L+L2+L2'");
   ws = mk();
   ws.select({ id: byTitle(ws, "L").id });
   ws.moveTab({ split: "tab", base: { id: byTitle(ws, "c1").id } });
