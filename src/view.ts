@@ -932,20 +932,40 @@ export class View implements DndHost {
     });
     const scroller = wrap.firstElementChild as HTMLElement;
     const kids: HTMLElement[] = [];
-    // The fold button, at the bar's left: ▾ collapses the bar to its 2px — what's left is the
-    // tabs' top line, the active tab's highlight marking the pane's bottom edge. Collapsed, the
-    // button becomes a right triangle over the pane's corner (in the active tab's accent) that
-    // brings the bar back. The tabs stay in the bar either way: the shortcuts keep working.
+    // The fold button, at the bar's right end, next to the ⋯: ▾ collapses the bar to its 2px —
+    // what's left is the tabs' top line, the active tab's highlight marking the pane's bottom
+    // edge. Collapsed, the button becomes a right triangle over the pane's bottom-right corner
+    // (in the active tab's accent): a click brings the bar back, a drag moves the pane (the
+    // bar's other handles are gone then). The tabs stay in the bar either way: the shortcuts
+    // keep working.
     const collapsed = this.collapsedBars.has(node.id);
     const fold = this.parts.get(`fold:${node.id}`, data, (cur) => {
       const fold = div("carreau-tabbar-fold");
-      fold.addEventListener("pointerdown", (e) => e.stopPropagation());
-      fold.addEventListener("click", () => this.collapseTabBar(cur().node.id));
+      let x0 = 0;
+      let y0 = 0;
+      let moved = false;
+      fold.addEventListener("pointerdown", (e) => {
+        const { node, paneEl } = cur();
+        x0 = e.clientX;
+        y0 = e.clientY;
+        moved = false;
+        if (this.collapsedBars.has(node.id))
+          this.dnd.arm(e, { kind: "pane", paneId: node.id }, node.tabs[node.active]?.title ?? node.name ?? "pane", paneEl);
+        else e.stopPropagation();
+      });
+      // arm captured the pointer on the wedge: its moves come here even once it's elsewhere
+      // (the same 5px as dnd, so this sees exactly when a press becomes a drag).
+      fold.addEventListener("pointermove", (e) => {
+        if (e.buttons && Math.hypot(e.clientX - x0, e.clientY - y0) > 5) moved = true;
+      });
+      fold.addEventListener("click", () => {
+        if (moved) return; // the click a pane drag ends with must not reopen the bar
+        this.collapseTabBar(cur().node.id);
+      });
       return fold;
     });
     fold.textContent = collapsed ? "" : "▾";
-    setAttr(fold, "title", collapsed ? "Expand the tab bar" : "Collapse the tab bar");
-    kids.push(fold);
+    setAttr(fold, "title", collapsed ? "Click to expand the tab bar, drag to move this pane" : "Collapse the tab bar");
     // Its name, if it has one: left of the tabs (double-click: edit it). It's a handle, like the
     // header's empty part.
     if (node.name && !collapsed) {
@@ -974,7 +994,7 @@ export class View implements DndHost {
         }),
       );
     if (!ctx.floating && !collapsed)
-      // "More" button at the right end: opens the pane menu.
+      // "More" button, at the bar's right end (left of the fold button): opens the pane menu.
       kids.push(
         this.parts.get(`more:${node.id}`, data, (cur) => {
           const more = Object.assign(div("carreau-more"), { title: "Pane options", textContent: "⋯" });
@@ -991,6 +1011,9 @@ export class View implements DndHost {
           return more;
         }),
       );
+    // The fold button, last: the bar's right end, next to the ⋯ (collapsed, the wedge takes
+    // that very corner).
+    kids.push(fold);
     syncChildren(bar, kids);
     bar.classList.toggle("collapsed", collapsed);
     const tabs: HTMLElement[] = [];
@@ -1013,9 +1036,10 @@ export class View implements DndHost {
     syncChildren(scroller, tabs);
   }
 
-  /** Collapse a pane's tab bar, or bring it back (its ▾/▴). While collapsed, the bar keeps its
-   *  2px: the tabs' top line — the active tab's highlight, on the pane's bottom edge — and the
-   *  ▴ in the corner; the tabs are still there, so the tab shortcuts keep working. */
+  /** Collapse a pane's tab bar, or bring it back (its ▾, its corner wedge). While collapsed, the
+   *  bar keeps its 2px: the tabs' top line — the active tab's highlight, on the pane's bottom
+   *  edge — and the wedge in its bottom-right corner, which drags the pane and, on a click,
+   *  brings the bar back; the tabs are still there, so the tab shortcuts keep working. */
   collapseTabBar(paneId: string): void {
     if (this.collapsedBars.delete(paneId)) this.render();
     else {

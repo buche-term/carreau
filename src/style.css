@@ -39,9 +39,10 @@
 .carreau-tabs-wrap::after { right: 0; background: linear-gradient(to left, light-dark(#0002, #000c), transparent); }
 .carreau-tabs-wrap.more-left::before, .carreau-tabs-wrap.more-right::after { opacity: 1; }
 .carreau-tabspace { flex: 1 0 24px; cursor: grab; }
-/* The fold button (▾/▴), at the bar's left; collapsed, the bar is just the tabs' 2px top line
-   (the active tab's highlight, at the pane's bottom edge), and the ▴ waits in the bottom-left
-   corner, in the active tab's accent, to bring the bar back. */
+/* The fold button (▾), at the bar's right end, next to the ⋯; collapsed, the bar is just the
+   tabs' 2px top line (the active tab's highlight, at the pane's bottom edge), and the wedge
+   waits in the bottom-right corner, in the active tab's accent: click it to bring the bar
+   back, drag it to move the pane (the bar's other handles are hidden then). */
 .carreau-tabbar-fold {
   flex: none; display: flex; align-items: center; padding: 0 5px; cursor: pointer;
   color: light-dark(#8a8d96, #80838d); font-size: 14px; line-height: 1;
@@ -52,11 +53,16 @@
    line, at the pane's bottom edge, marks it where it sits). */
 .carreau-tabbar.collapsed .carreau-tab > *, .carreau-tabbar.collapsed .carreau-tab-link { visibility: hidden; }
 .carreau-tabbar.collapsed .carreau-tabs-wrap::before, .carreau-tabbar.collapsed .carreau-tabs-wrap::after { display: none; }
-/* The collapsed fold: a right triangle over the pane's corner itself (its clip is its hit
-   area too), in the active tab's accent. */
+/* The collapsed fold: the right triangle over the pane's bottom-right corner (in the active
+   tab's accent) is painted by the pseudo-element — the box itself stays a plain, unclipped
+   square: the hit area, so it doesn't reach along the pane's edges into the resize hitboxes.
+   Its cursor stays a pointer (click first, drag second). */
 .carreau-tabbar.collapsed > .carreau-tabbar-fold {
-  position: absolute; left: 0; bottom: 0; width: 16px; height: 16px; padding: 0;
-  background: var(--focus-accent, light-dark(#8a8d96, #80838d)); clip-path: polygon(0 0, 0 100%, 100% 100%);
+  position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; padding: 0;
+}
+.carreau-tabbar.collapsed > .carreau-tabbar-fold::before {
+  content: ""; position: absolute; inset: 0;
+  background: var(--focus-accent, light-dark(#8a8d96, #80838d)); clip-path: polygon(100% 0, 100% 100%, 0 100%);
 }
 /* Every tab's text is faded except the selected one (active tab of the focused pane). The
    active tab of each pane has a line on the header's grey line: mid grey, or the tab's
