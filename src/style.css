@@ -42,7 +42,8 @@
 /* The fold button (▾), at the bar's right end, next to the ⋯; collapsed, the bar is just the
    tabs' 2px top line (the active tab's highlight, at the pane's bottom edge), and the wedge
    waits in the bottom-right corner, in the active tab's accent: click it to bring the bar
-   back, drag it to move the pane (the bar's other handles are hidden then). */
+   back, drag it to move the pane (the bar's other handles are hidden then). A single unnamed
+   tab starts folded — a tab joining, or a name, unfolds it — until a click pins the fold. */
 .carreau-tabbar-fold {
   flex: none; display: flex; align-items: center; padding: 0 5px; cursor: pointer;
   color: light-dark(#8a8d96, #80838d); font-size: 14px; line-height: 1;

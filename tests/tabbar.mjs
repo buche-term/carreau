@@ -1,7 +1,8 @@
 // The collapsible tab bar (▾): collapsed, the bar keeps its 2px — the tabs' top line, the
 // active tab's highlight, at the pane's bottom edge — plus the wedge in the bottom-right
 // corner, in the active tab's accent (click: unfold; drag: move the pane). The tabs stay in
-// the DOM: the tab shortcuts keep working.
+// the DOM: the tab shortcuts keep working. A single unnamed tab starts folded, and a tab
+// joining unfolds it — until the user folds it themselves, which then sticks.
 import { chromium } from "playwright";
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1300, height: 800 } });
@@ -75,4 +76,27 @@ console.log("nextTab while collapsed:", (await pane.locator(".carreau-tab.active
 // it, over the content, unfolds all the same).
 await fold.click({ position: { x: 2, y: 2 } });
 console.log("unfolded:", (await height()) === "27px", (await fold.textContent()) === "▾");
+
+// The automatic fold: a single unnamed tab starts folded, a tab joining unfolds it, but a fold
+// the user clicked sticks (the Outline pane).
+const outline = page.locator(".carreau-pane", { has: tab("Outline") });
+const outlineHeight = () => outline.locator(".carreau-tabbar").evaluate((b) => getComputedStyle(b).height);
+const spawnTab = () => outline.evaluate((p) => window.ws.spawnTabInto(p.dataset.id));
+console.log("a single unnamed tab starts folded:", (await outlineHeight()) === "2px");
+await spawnTab();
+console.log("a tab joining unfolds it:", (await outlineHeight()) === "27px");
+await outline.locator(".carreau-tabbar-fold").click(); // the user folds it (pinned)
+await spawnTab();
+console.log("the user's fold sticks, tabs notwithstanding:", (await outlineHeight()) === "2px");
+await outline.locator(".carreau-tabbar-fold").click({ position: { x: 8, y: 12 } }); // and so does their unfold
+console.log("…and so does their unfold:", (await outlineHeight()) === "27px");
+// The automatic fold, unpinned, follows the pane: a reload, then a name is a reason for the
+// bar (it unfolds), and taking the name away folds the single tab again.
+await page.reload();
+await page.waitForTimeout(200);
+const name = (n) => outline.evaluate((p, v) => window.ws.namePane(p.dataset.id, v), n);
+await name("Docs");
+console.log("a name unfolds it too:", (await outlineHeight()) === "27px");
+await name(null);
+console.log("…un-naming folds it back:", (await outlineHeight()) === "2px");
 await browser.close();

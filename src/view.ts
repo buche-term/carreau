@@ -244,8 +244,10 @@ export class View implements DndHost {
   private navMode: "off" | "held" | "sticky" = "off";
   private menu: HTMLElement | null = null;
   private menuAnchor: HTMLElement | null = null;
-  /** Panes whose tab bar is collapsed (the ▾/▴ on the bar; view state, see `fillTabBar`). */
-  private collapsedBars = new Set<string>();
+  /** What the user made of each pane's bar fold (true: folded, false: open). Their say sticks;
+   *  absent (automatic), a single unnamed tab's bar folds itself — see `isBarCollapsed`. View
+   *  state, see `fillTabBar`. */
+  private barFold = new Map<string, boolean>();
   /** One persistent element per tab, by tab id. */
   private contents = new Persistent();
   /** Other persistent elements, for renderers (`persist`). */
@@ -937,8 +939,9 @@ export class View implements DndHost {
     // edge. Collapsed, the button becomes a right triangle over the pane's bottom-right corner
     // (in the active tab's accent): a click brings the bar back, a drag moves the pane (the
     // bar's other handles are gone then). The tabs stay in the bar either way: the shortcuts
-    // keep working.
-    const collapsed = this.collapsedBars.has(node.id);
+    // keep working. A single unnamed tab starts folded (a tab joining, or a name, unfolds it)
+    // — a click pins the fold either way, and the pin sticks (see `isBarCollapsed`).
+    const collapsed = this.isBarCollapsed(node);
     const fold = this.parts.get(`fold:${node.id}`, data, (cur) => {
       const fold = div("carreau-tabbar-fold");
       let x0 = 0;
@@ -949,7 +952,7 @@ export class View implements DndHost {
         x0 = e.clientX;
         y0 = e.clientY;
         moved = false;
-        if (this.collapsedBars.has(node.id))
+        if (this.isBarCollapsed(node))
           this.dnd.arm(e, { kind: "pane", paneId: node.id }, node.tabs[node.active]?.title ?? node.name ?? "pane", paneEl);
         else e.stopPropagation();
       });
@@ -1036,16 +1039,24 @@ export class View implements DndHost {
     syncChildren(scroller, tabs);
   }
 
-  /** Collapse a pane's tab bar, or bring it back (its ▾, its corner wedge). While collapsed, the
-   *  bar keeps its 2px: the tabs' top line — the active tab's highlight, on the pane's bottom
-   *  edge — and the wedge in its bottom-right corner, which drags the pane and, on a click,
-   *  brings the bar back; the tabs are still there, so the tab shortcuts keep working. */
+  /** Whether a pane's bar is folded. A click on the fold pins it (see `collapseTabBar`), and
+   *  the pin sticks; unpinned, the fold is automatic: a single unnamed tab leaves nothing to
+   *  choose from, so the bar stays folded until a tab joins it or the pane gets a name. */
+  private isBarCollapsed(node: PaneNode): boolean {
+    return this.barFold.get(node.id) ?? (node.tabs.length === 1 && !node.name);
+  }
+
+  /** Collapse a pane's tab bar, or bring it back (its ▾, its corner wedge): what the user
+   *  clicks is theirs for good, pinned over the automatic fold either way. While collapsed,
+   *  the bar keeps its 2px: the tabs' top line — the active tab's highlight, on the pane's
+   *  bottom edge — and the wedge in its bottom-right corner, which drags the pane and, on a
+   *  click, brings the bar back; the tabs are still there, so the tab shortcuts keep
+   *  working. */
   collapseTabBar(paneId: string): void {
-    if (this.collapsedBars.delete(paneId)) this.render();
-    else {
-      this.collapsedBars.add(paneId);
-      this.render();
-    }
+    const node = this.ws.node(paneId);
+    const folded = node?.type === "pane" ? this.isBarCollapsed(node) : (this.barFold.get(paneId) ?? false);
+    this.barFold.set(paneId, !folded);
+    this.render();
   }
 
   /** A tab: [icon][short][×]. The status changes how the icon looks (see the CSS). */
