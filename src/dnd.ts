@@ -53,6 +53,8 @@ export interface DndHost {
   visRect(id: string): Rect | null;
   /** where a pane floated out of the layout appears */
   floatRect(paneId: string): Rect | null;
+  /** Unfold a pane's collapsed tab bar (a drag resting on its corner wedge, to drop into it). */
+  expandTabBar(paneId: string): void;
 }
 
 /** One possible drop. */
@@ -151,6 +153,8 @@ const LINE_HIT = 8;
 const MINI_DELAY = 250;
 /** How long the cursor rests on a tab, still, during a drag before the tab gets the focus. */
 const TAB_FOCUS_DELAY = 250;
+/** How long a drag rests on a collapsed tab bar's corner wedge before the bar unfolds. */
+const UNFOLD_DELAY = 200;
 const MINI_LEN = 44;
 const MINI_T = 6;
 const MINI_GAP = 3;
@@ -178,6 +182,9 @@ export class DragDrop {
   private miniTimer: ReturnType<typeof setTimeout> | null = null;
   /** The wait before a tab the cursor rests on (during a drag) gets the focus; null: none. */
   private dwellTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The collapsed bar's pane whose wedge the drag rests on, and the wait before it unfolds. */
+  private unfoldPane: string | null = null;
+  private unfoldTimer: ReturnType<typeof setTimeout> | null = null;
   /** The layout's index, during a drag (it doesn't change meanwhile). */
   private index: LayoutIndex | null = null;
   /** No drag may start before this time. */
@@ -273,6 +280,7 @@ export class DragDrop {
     this.waitForMinis(null);
     if (this.dwellTimer) clearTimeout(this.dwellTimer);
     this.dwellTimer = null;
+    this.waitToUnfold(null);
     d.ghost.remove();
     d.sourceEl.classList.remove("carreau-drag-source");
     this.host.el.classList.remove("is-dragging");
@@ -316,6 +324,23 @@ export class DragDrop {
     const base = host.el.getBoundingClientRect();
     const px = ev.clientX - base.left;
     const py = ev.clientY - base.top;
+
+    // On a collapsed bar's corner wedge: nothing but the wedge, over every other drop (lines,
+    // mini lines, zones…) — resting there unfolds the bar (see `waitToUnfold`), whose tab gaps
+    // are then drops.
+    const wedge = this.wedgeAt(ev);
+    this.waitToUnfold(wedge);
+    if (wedge) {
+      d.near = d.active = d.minis = null;
+      d.hoverPane = null;
+      d.tabBar = d.zones = null;
+      d.inCenter = false;
+      this.waitForMinis(null);
+      if (this.dwellTimer) clearTimeout(this.dwellTimer);
+      this.dwellTimer = null;
+      this.draw();
+      return;
+    }
 
     // While mini lines are out, the corridor they span (the line included) is the line's: on a
     // mini line, its choice; elsewhere in it, the line's main choice. (The line, and the
@@ -397,6 +422,42 @@ export class DragDrop {
     this.waitForMinis(d.near && d.near.levels.length + d.near.far.length > 1 ? d.near.key : null);
     this.tabDwell(ev);
     this.draw();
+  }
+
+  /** The pane whose collapsed bar's corner wedge is under the cursor (not the dragged pane's:
+   *  dragging a pane by its wedge starts there). Null: none. */
+  private wedgeAt(ev: PointerEvent): string | null {
+    for (const el of document.elementsFromPoint(ev.clientX, ev.clientY)) {
+      const fold = (el as HTMLElement).closest?.(".carreau-tabbar.collapsed > .carreau-tabbar-fold") as HTMLElement | null;
+      if (!fold) continue;
+      const paneEl = fold.parentElement!.parentElement;
+      const id = paneEl?.classList.contains("carreau-pane") ? paneEl.dataset.id : undefined;
+      const s = this.state!.subject;
+      return id && !(s.kind === "pane" && s.paneId === id) ? id : null;
+    }
+    return null;
+  }
+
+  /**
+   * Wedge dwell: the cursor resting on a collapsed bar's corner wedge during a drag unfolds
+   * the bar, so the drag can then go into it. Moving within the same wedge keeps the wait
+   * going; leaving it cancels.
+   */
+  private waitToUnfold(paneId: string | null): void {
+    if (paneId === this.unfoldPane) return;
+    if (this.unfoldTimer) clearTimeout(this.unfoldTimer);
+    this.unfoldTimer = null;
+    this.unfoldPane = paneId;
+    if (paneId) this.unfoldTimer = setTimeout(() => this.unfold(paneId), UNFOLD_DELAY);
+  }
+
+  private unfold(paneId: string): void {
+    this.unfoldTimer = null;
+    this.unfoldPane = null;
+    if (!this.state) return;
+    this.host.expandTabBar(paneId);
+    // The bar is there now: its tab gaps are drops (a fresh look at what's under the cursor).
+    this.refresh();
   }
 
   /** (Re)start the wait before a line's mini lines pop out (by key; null: none to wait for). */

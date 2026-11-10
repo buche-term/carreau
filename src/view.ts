@@ -1059,6 +1059,15 @@ export class View implements DndHost {
     this.render();
   }
 
+  /** Unfold a pane's tab bar if it's collapsed (a drag resting on its wedge: see the dnd),
+   *  pinned open like a click on the wedge. */
+  expandTabBar(paneId: string): void {
+    const node = this.ws.node(paneId);
+    if (node?.type !== "pane" || !this.isBarCollapsed(node)) return;
+    this.barFold.set(paneId, false);
+    this.render();
+  }
+
   /** A tab: [icon][short][×]. The status changes how the icon looks (see the CSS). */
   private renderTab(node: PaneNode, t: Tab, i: number, ctx: Ctx): HTMLElement {
     const key = `${node.id}:${t.id}`;
