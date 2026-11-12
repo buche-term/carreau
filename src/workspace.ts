@@ -212,9 +212,8 @@ export class Workspace {
   private maxHistory: (Selection | null)[] = [];
   /**
    * Activation order, most recent first: container id -> child ids (focus moving through
-   * them); `tabs:<pane id>` -> tab ids (tabs becoming active); `focus:<pane id>` -> tab ids
-   * (tabs having the focus: active in a pane that is, or holds, the selection); "" -> cell ids
-   * (cells selected).
+   * them); `focus:<pane id>` -> tab ids (tabs having the focus: active in a pane that is, or
+   * holds, the selection); "" -> cell ids (cells selected).
    */
   private recent = new Map<string, string[]>();
   /** `${nodeId}:${side}` -> selection we came from through that side */
@@ -249,11 +248,8 @@ export class Workspace {
 
   /** Tell the listeners of a change: of the layout (by default), or of the selection only. */
   emit(kind: ChangeKind = "layout"): void {
-    // Tabs can become active in many ways (clicks, commands, drops): record them all here.
-    if (kind === "layout") {
-      for (const t of this.trees()) for (const p of panes(t)) if (p.tabs[p.active]) this.touch(`tabs:${p.id}`, p.tabs[p.active].id);
-      this.touchFocus();
-    }
+    // Tabs can get the focus in many ways (clicks, commands, drops): record it here.
+    if (kind === "layout") this.touchFocus();
     this.pruneOpeners();
     for (const fn of this.listeners) fn(kind);
   }
@@ -1138,7 +1134,7 @@ export class Workspace {
    * was in it, it moves where the parents decide (see `focusAfterClose`); otherwise it stays.
    */
   private remove(op: CloseOp): boolean {
-    const next = this.hasFocus(op) ? this.focusAfterClose(op) : null;
+    const next = this.hasFocusIn(op.id) ? this.focusAfterClose(op) : null;
     let picked: string | undefined;
     const del = (forest: SplitNode) => {
       if (op.kind === "pane") return removeNode(forest, op.id);
@@ -1185,15 +1181,11 @@ export class Workspace {
   }
 
   /**
-   * Whether the focus is in what closes: the pane holding the selection; the active tab of a
-   * pane that is, or holds, the selection (merged, the active member: what's shown, the
-   * selection included, may be another member's); or a group holding the selection.
+   * Whether the focus is in a tab or a node (by id; e.g. what closes, or a cell just opened):
+   * a node holding the selection; the active tab of a pane that is, or holds, the selection
+   * (merged, the active member: what's shown, the selection included, may be another
+   * member's); or a group tab holding the selection.
    */
-  private hasFocus(op: CloseOp): boolean {
-    return this.hasFocusIn(op.id);
-  }
-
-  /** Whether the focus is in a tab (as `hasFocus` says), or in a node (by id). */
   private hasFocusIn(id: string): boolean {
     const ft = this.findTab(id);
     if (!ft) {
