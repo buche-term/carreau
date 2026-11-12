@@ -340,6 +340,92 @@ for (const [a, b] of [["swapUp", "swapDown"], ["swapLeft", "swapRight"], ["swapR
   ws2.run("parent");
   check("and back", ws2.selection.id === h2.id);
 }
+// Focus when closing a cell just created: back to where the focus was, until it leaves it
+{
+  const allPanes = (ws) => [ws.root, ...ws.floating.map((w) => w.root)].flatMap((r) => panes(r));
+  const byTitle = (ws, t) => allPanes(ws).find((p) => p.tabs.some((x) => x.title === t));
+  const focused = (ws) => { const n = ws.node(ws.selection.id); return n?.type === "pane" ? n.tabs[n.active].title : `(${n?.type})`; };
+  const activate = (ws, t) => { const p = byTitle(ws, t); ws.activateTab(p.id, p.tabs.findIndex((x) => x.title === t)); };
+  const focusedTab = (ws) => { const n = ws.node(ws.selection.id); return n.tabs[n.active]; };
+  let n = 0;
+  const mkWs = (root) => {
+    const ws = new Workspace(root);
+    ws.lifecycle = { ...ws.lifecycle, spawn: () => ({ id: `tN${++n}`, title: `N${n}` }) };
+    return ws;
+  };
+  const titles = (ws, t) => byTitle(ws, t).tabs.map((x) => x.title).join(",");
+
+  // a new tab: next to the focus; closed right away, back to the focus (not its right neighbour)
+  let ws = mkWs(row([pane(["A", "B", "C"]), pane(["X"])]));
+  activate(ws, "A");
+  ws.spawn({ split: "tab" });
+  const t1 = focusedTab(ws);
+  check(`new tab after A: ${titles(ws, "A")}`, titles(ws, "A") === `A,${t1.title},B,C`);
+  await ws.closeTab(t1.id);
+  check(`closed right away: back to A (not B): ${focused(ws)}`, focused(ws) === "A");
+  // the focus went elsewhere meanwhile, then back to it: the usual rule (its right neighbour)
+  ws.spawn({ split: "tab" });
+  const t2 = focusedTab(ws);
+  activate(ws, "X"); activate(ws, t2.title);
+  await ws.closeTab(t2.id);
+  check(`after going elsewhere: the usual rule (B): ${focused(ws)}`, focused(ws) === "B");
+
+  // a new pane beside: back to the pane it came from (not its right neighbour)
+  ws = mkWs(row([pane(["P"]), pane(["Q"])]));
+  activate(ws, "P");
+  ws.spawn({ split: "right" });
+  const t3 = focusedTab(ws);
+  check(`new pane right of P: ${ws.root.children.map((c) => c.tabs[0].title).join(",")}`, ws.root.children[1].tabs[0].id === t3.id);
+  await ws.closeTab(t3.id);
+  check(`its pane closed: back to P (not Q): ${focused(ws)}`, focused(ws) === "P");
+  // closing the pane rather than the tab: likewise
+  ws.spawn({ split: "right" });
+  await ws.closePane(ws.root.children[1].id);
+  check(`closing the new pane: back to P: ${focused(ws)}`, focused(ws) === "P");
+
+  // a chain: N1 from A, N2 from N1; closing N2 goes to N1, then N1 to A
+  ws = mkWs(row([pane(["A", "B"]), pane(["X"])]));
+  activate(ws, "A");
+  ws.spawn({ split: "tab" });
+  const c1 = focusedTab(ws);
+  ws.spawn({ split: "right" });
+  const c2 = focusedTab(ws);
+  await ws.closeTab(c2.id);
+  check(`chain: N2 closed, back to N1: ${focused(ws)}`, focused(ws) === c1.title);
+  await ws.closeTab(c1.id);
+  check(`chain: N1 closed, back to A: ${focused(ws)}`, focused(ws) === "A");
+
+  // a new floating window: closing it, back to where the focus was
+  ws = mkWs(row([pane(["A"]), pane(["B"]), pane(["C"])]));
+  activate(ws, "B"); activate(ws, "A");
+  ws.spawnFloat({ x: 0, y: 0, w: 100, h: 100 });
+  const f = focusedTab(ws);
+  await ws.closeTab(f.id);
+  check(`floating window closed: back to A: ${focused(ws)}`, focused(ws) === "A");
+
+  // a new tab with the focus in another tab of the same pane meanwhile: forgotten
+  ws = mkWs(row([pane(["A", "B", "C"]), pane(["X"])]));
+  activate(ws, "B");
+  ws.spawn({ split: "tab" });
+  const t4 = focusedTab(ws);
+  activate(ws, "A"); activate(ws, t4.title);
+  await ws.closeTab(t4.id);
+  check(`same pane, A visited meanwhile: the usual rule (C): ${focused(ws)}`, focused(ws) === "C");
+
+  // a host creating a cell itself (hostDrop: the focus stays), then focusing it: markOpened
+  ws = mkWs(row([pane(["A", "B"]), pane(["X"])]));
+  activate(ws, "A");
+  const hp = byTitle(ws, "A");
+  ws.hostDrop({ kind: "external", node: { type: "pane", id: "pH", weight: 1, tabs: [{ id: "tH", title: "H" }], active: 0 } }, { kind: "tab", paneId: hp.id, index: 1 });
+  ws.markOpened("tH");
+  activate(ws, "H");
+  await ws.closeTab("tH");
+  check(`host-made, marked: back to A (not B): ${focused(ws)}`, focused(ws) === "A");
+  ws.hostDrop({ kind: "external", node: { type: "pane", id: "pH", weight: 1, tabs: [{ id: "tH", title: "H" }], active: 0 } }, { kind: "tab", paneId: hp.id, index: 1 });
+  activate(ws, "H");
+  await ws.closeTab("tH");
+  check(`host-made, not marked: the usual rule (B): ${focused(ws)}`, focused(ws) === "B");
+}
 // Focus when closing a tab
 {
   const byTitle = (ws, t) => [ws.root, ...ws.floating.map((w) => w.root)].flatMap((r) => panes(r)).find((p) => p.tabs.some((x) => x.title === t));
@@ -347,23 +433,25 @@ for (const [a, b] of [["swapUp", "swapDown"], ["swapLeft", "swapRight"], ["swapR
   const focused = (ws) => { const n = ws.node(ws.selection.id); return n?.type === "pane" ? n.tabs[n.active].title : `(${n?.type})`; };
   const activate = (ws, t) => { const p = byTitle(ws, t); ws.activateTab(p.id, p.tabs.findIndex((x) => x.title === t)); };
 
-  // a tab group: back to the previously activated tab
+  // a tab group: the tab to the right (not the previously activated one), else the rightmost
   let ws = new Workspace(row([pane(["a", "b", "c", "d"]), pane(["X"])]));
-  activate(ws, "b"); activate(ws, "d"); activate(ws, "a"); activate(ws, "c");
+  activate(ws, "b"); activate(ws, "a"); activate(ws, "c");
   await ws.closeTab(tabId(ws, "c"));
-  check(`tabs: closing the focused tab goes back to the previous one (a): ${focused(ws)}`, focused(ws) === "a");
-  await ws.closeTab(tabId(ws, "a"));
-  check(`…and again (d): ${focused(ws)}`, focused(ws) === "d");
+  check(`tabs: closing the focused tab goes to the one on its right (d): ${focused(ws)}`, focused(ws) === "d");
+  await ws.closeTab(tabId(ws, "d"));
+  check(`…the last one: the rightmost left (b): ${focused(ws)}`, focused(ws) === "b");
   // not focused: nothing special
   activate(ws, "X");
   await ws.closeTab(tabId(ws, "b"));
   check(`closing a tab that hasn't the focus leaves it (X): ${focused(ws)}`, focused(ws) === "X");
 
-  // a plain split: back to the previously focused child
+  // a plain split: the child after it (not the previously focused one), else the last
   ws = new Workspace(row([pane(["A"]), pane(["B"]), pane(["C"]), pane(["D"])]));
-  activate(ws, "D"); activate(ws, "A"); activate(ws, "C");
+  activate(ws, "B"); activate(ws, "A"); activate(ws, "C");
   await ws.closeTab(tabId(ws, "C"));
-  check(`split: closing the focused pane goes back to the previous one (A): ${focused(ws)}`, focused(ws) === "A");
+  check(`split: closing the focused pane goes to the one after it (D): ${focused(ws)}`, focused(ws) === "D");
+  await ws.closeTab(tabId(ws, "D"));
+  check(`…the last one: the last left (B): ${focused(ws)}`, focused(ws) === "B");
   // nested: the parent split picks a child, then down through what was focused in it
   ws = new Workspace(row([column([pane(["T"]), pane(["U"])]), pane(["V"]), pane(["W"])]));
   activate(ws, "U"); activate(ws, "T"); activate(ws, "W"); activate(ws, "V");
@@ -715,6 +803,46 @@ for (const [a, b] of [["swapUp", "swapDown"], ["swapLeft", "swapRight"], ["swapR
   ws.undo();
   check("undo: merged again", tabsOf() === "tB+tA,tN | tX");
 }
+// Closing a focused merged tab: the member to its right, else the rightmost (as for tabs)
+{
+  const kt = (title) => ({ id: "t" + title, title, key: "t" });
+  const ws = new Workspace(row([pane([kt("A"), kt("B"), kt("C"), kt("D")]), pane(["X"])]));
+  const p = () => ws.root.children[0];
+  ws.commitDrop(ws.tryDrop({ kind: "tab", tabId: "tB" }, { kind: "merge", tabId: "tA" }));
+  ws.commitDrop(ws.tryDrop({ kind: "tab", tabId: "tC" }, { kind: "merge", tabId: "tB" }));
+  ws.commitDrop(ws.tryDrop({ kind: "tab", tabId: "tD" }, { kind: "merge", tabId: "tC" }));
+  const activeTitle = () => p().tabs[p().active].title;
+  ws.activateTab(p().id, p().tabs.findIndex((t) => t.id === "tB"));
+  await ws.closeTab("tB");
+  check(`merged: closing B (of A+B+C+D) goes to C: ${activeTitle()}`, activeTitle() === "C");
+  ws.activateTab(p().id, p().tabs.findIndex((t) => t.id === "tD"));
+  await ws.closeTab("tD");
+  check(`merged: closing D, the last, goes to the rightmost left (C): ${activeTitle()}`, activeTitle() === "C");
+}
+// A new tab, by default, goes just after the focused one: into its complex if it can merge
+{
+  const { shape } = await server.ssrLoadModule("/src/model.ts");
+  const kt = (title, key = "t") => ({ id: "t" + title, title, key });
+  const mk = () => {
+    const ws = new Workspace(row([pane([kt("A"), kt("B"), kt("C"), kt("Z", null)]), pane(["X"])]));
+    ws.commitDrop(ws.tryDrop({ kind: "tab", tabId: "tB" }, { kind: "merge", tabId: "tA" }));
+    ws.commitDrop(ws.tryDrop({ kind: "tab", tabId: "tC" }, { kind: "merge", tabId: "tB" }));
+    const p = ws.root.children[0];
+    ws.activateTab(p.id, p.tabs.findIndex((t) => t.id === "tB"));
+    return ws;
+  };
+  const tabsOf = (ws) => shape(ws.root.children[0]).replace(/^\[|\]$/g, "");
+  let ws = mk();
+  ws.place({ split: "tab" }, kt("N"));
+  check(`new mergeable tab, B focused in A+B+C: joins just after B: ${tabsOf(ws)}`, tabsOf(ws) === "tA+tB+tN+tC,tZ");
+  check("  and has the focus", ws.root.children[0].tabs[ws.root.children[0].active].id === "tN");
+  ws = mk();
+  ws.place({ split: "tab" }, kt("M", "other"));
+  check(`new unmergeable tab: just after the complex: ${tabsOf(ws)}`, tabsOf(ws) === "tA+tB+tC,tM,tZ");
+  ws = mk();
+  ws.spawnTabInto(ws.root.children[0].id);
+  check(`a new tab spawned from B (a plain new tab, unmergeable): after the complex: ${tabsOf(ws)}`, /^tA\+tB\+tC,t[^,+]+,tZ$/.test(tabsOf(ws)));
+}
 // Dragging a whole complex (by its link icon): a block of tabs, staying merged
 {
   const { shape } = await server.ssrLoadModule("/src/model.ts");
@@ -990,11 +1118,11 @@ for (const [a, b] of [["swapUp", "swapDown"], ["swapLeft", "swapRight"], ["swapR
   ws.select({ id: byTitle(ws, "L").id });
   ws.moveTab({ split: "tab", base: { id: panes(ws.root).find((p) => p.tabs[0].group).id } });
   check(`a tab moved into the stream's holder: after its last focused cell (c3): ${cells(ws)}`, cells(ws) === "c1,c2,c3,L");
-  // Into a plain pane: its tabs, as before.
+  // Into a plain pane: its tabs, just after its active one.
   ws = mk();
   ws.select({ id: byTitle(ws, "c1").id });
   ws.moveTab({ split: "tab", base: { id: byTitle(ws, "L").id } });
-  check("into a plain pane: its tabs", byTitle(ws, "L").tabs.map((x) => x.title).join("+") === "L+L2+c1");
+  check("into a plain pane: its tabs, after the active one", byTitle(ws, "L").tabs.map((x) => x.title).join("+") === "L+c1+L2");
   // A new cell as a floating window.
   ws = mk();
   ws.lifecycle = { ...ws.lifecycle, spawn: (from) => ({ id: "tnew", title: from.title + "'" }) };

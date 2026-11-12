@@ -221,9 +221,18 @@ const pane: NodeKind = {
     if (env.ctx(p)?.cellOf && parent) return { defer: parent, near: p };
     const root = activeGroup(p)?.children[0];
     if (root) return { defer: root };
-    return { kind: "tab", paneId: p.id, index: p.tabs.length };
+    return afterActive(p);
   },
 };
+
+/**
+ * Where something added to a pane's tabs goes by default: just after its active tab. If that
+ * tab is merged, what arrives joins its complex there if it can, else goes after the complex
+ * (`near`: see `DropTarget`).
+ */
+export function afterActive(p: PaneNode): DropTarget {
+  return { kind: "tab", paneId: p.id, index: p.tabs.length ? p.active + 1 : 0, near: true };
+}
 
 /** A leaf that holds nothing and closes instantly: a base for leaf kinds besides panes. */
 export const leafKind: NodeKind = {

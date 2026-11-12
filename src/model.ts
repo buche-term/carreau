@@ -4,7 +4,7 @@
 import { sideAxis, sideIsStart } from "./geometry";
 import { canCollapse, isScroll, isSplit, kind, kindOf, mergeKey, vanishes } from "./kinds";
 import { find, findTab, panes, pathTo } from "./tree";
-import { canMerge, linkedRuns, newLink, normalizeLinks, trackComplexes } from "./complex";
+import { canMerge, complexAt, linkedRuns, newLink, normalizeLinks, trackComplexes } from "./complex";
 import { LayoutNode, PaneNode, Side, SplitNode, Tab, WorkspaceData, FloatingWindow } from "./types";
 
 export * from "./types";
@@ -285,8 +285,11 @@ export type DropTarget =
    * Into a pane's tabs, at `index`. `join`: the link of a complex next to that position, which
    * a dragged tab joins there (it must be able to merge with it). Otherwise it lands there as a
    * plain tab, out of any complex (so not between two members of one). See complex.ts.
+   * `near`: a default position (e.g. just after the active tab), not one picked by hand: next
+   * to a complex's member (after it), what arrives joins the complex there if it can merge
+   * with it (a new tab, or moved tabs: not a pane's), else it goes just after the complex.
    */
-  | { kind: "tab"; paneId: string; index: number; join?: string }
+  | { kind: "tab"; paneId: string; index: number; join?: string; near?: boolean }
   /** Insert as child `index` of split `splitId`, sized to 1/N of the split. */
   | { kind: "between"; splitId: string; index: number }
   /** Exchange contents with a pane: a tab trades places with its active tab; a pane, all tabs. */
@@ -370,6 +373,22 @@ function placeTabs(p: PaneNode, i: number, tabs: Tab[], join?: string): boolean 
   return !(l?.link && l.link === r?.link);
 }
 
+/**
+ * Where a `near` tab target really goes (see `DropTarget`): after a complex's member, into
+ * the complex if what arrives can merge with it, else just after the complex.
+ */
+function resolveNear(root: LayoutNode, subject: DragSubject, target: DropTarget & { kind: "tab" }): DropTarget {
+  const { near: _, join: __, ...plain } = target;
+  const dest = find(root, target.paneId)?.node;
+  const i = target.index - 1;
+  if (dest?.type !== "pane" || !dest.tabs[i]?.link) return plain;
+  const arriving =
+    subject.kind === "external" ? (subject.node.type === "pane" ? subject.node.tabs : []) : subject.kind === "pane" ? [] : (draggedTabs(root, subject)?.tabs ?? []);
+  if (arriving.length && arriving.every((t) => canMerge(dest, i, t))) return { ...plain, join: dest.tabs[i].link };
+  const c = complexAt(dest, i);
+  return { ...plain, index: c.start + c.tabs.length };
+}
+
 /** The tabs a tab or complex subject drags, where they are (a complex: its members' run). */
 function draggedTabs(root: LayoutNode, subject: DragSubject): { pane: PaneNode; index: number; tabs: Tab[] } | null {
   if (subject.kind === "tab") {
@@ -402,6 +421,7 @@ function detachTabs(d: { pane: PaneNode; index: number; tabs: Tab[] }): number {
 /** Works on the forest in place. Returns where the dragged thing went, or null. */
 /** Apply a drop in place, to a forest (as `inForest` gives). Null if invalid. */
 export function applyDropRaw(root: SplitNode, subject: DragSubject, target: DropTarget): { paneId: string; floated?: PaneNode } | null {
+  if (target.kind === "tab" && target.near) target = resolveNear(root, subject, target);
   if (wouldNestInItself(root, subject, target)) return null;
   if (target.kind === "side") {
     const t = find(root, target.targetId)?.node;
@@ -497,10 +517,12 @@ export function applyDropRaw(root: SplitNode, subject: DragSubject, target: Drop
   if (target.kind === "tab") {
     const dest = find(root, target.paneId)?.node;
     if (moving.type !== "pane" || dest?.type !== "pane") return null; // only a pane's tabs join
-    // Not into a complex (a pane's tabs don't join one), nor between two of its members.
+    // Not into a complex (a pane's tabs don't join one; new tabs may), nor between two of its
+    // members.
     const [l, r] = [dest.tabs[target.index - 1], dest.tabs[target.index]];
-    if (target.join || (l?.link && l.link === r?.link)) return null;
+    if (target.join ? subject.kind !== "external" : l?.link && l.link === r?.link) return null;
     dest.tabs.splice(target.index, 0, ...moving.tabs);
+    if (target.join && !placeTabs(dest, target.index, moving.tabs, target.join)) return null;
     dest.active = target.index + moving.active;
     // A named pane's name goes with its tabs, to a pane that has none. One that has a name
     // keeps it: then the dropped pane stays behind, empty, with its own (it isn't lost).

@@ -3,6 +3,7 @@
 
 import { Cell, Placer } from "./cells";
 import {
+  afterActive,
   DragSubject,
   DropTarget,
   Entry,
@@ -168,8 +169,23 @@ interface CloseOp {
   kind: "tab" | "pane" | "tabs";
   id: string;
   tabIds: string[];
-  /** A tab: the other members of the complex it was merged in (it leaves it before closing). */
+  /**
+   * A tab: the other members of the complex it was merged in (it leaves it before closing),
+   * in the order the focus prefers them: those that were to its right, then those to its left
+   * (nearest first). See `linkedWith`.
+   */
   linked?: string[];
+}
+
+/**
+ * Where the focus was when a cell was created (see `Workspace.openers`): the selection, and
+ * the active tabs of the panes on its path (so that a pane's tab comes back too).
+ */
+interface Opener {
+  selection: Selection;
+  active: { paneId: string; tabId: string }[];
+  /** The cell just created that had the focus then, if any: it is kept while this one is. */
+  parent?: string;
 }
 
 /** Statuses of finished cells: what `clear` removes. */
@@ -203,6 +219,13 @@ export class Workspace {
   private recent = new Map<string, string[]>();
   /** `${nodeId}:${side}` -> selection we came from through that side */
   private boundary = new Map<string, Selection>();
+  /**
+   * Cells just created (by tab or node id), with where the focus came from: closing one
+   * while it still has the focus goes back there. Forgotten as soon as the focus leaves it
+   * (except into a cell created from it: then it is kept as long as that one is). Not part of
+   * the layout (not undone, not saved).
+   */
+  private openers = new Map<string, Opener>();
   /** The latest single pane selected (multi-selections don't stick). */
   private lastPane: string | null = null;
   /** selections preceding each expand, so that they can be undone */
@@ -231,7 +254,43 @@ export class Workspace {
       for (const t of this.trees()) for (const p of panes(t)) if (p.tabs[p.active]) this.touch(`tabs:${p.id}`, p.tabs[p.active].id);
       this.touchFocus();
     }
+    this.pruneOpeners();
     for (const fn of this.listeners) fn(kind);
+  }
+
+  /**
+   * For hosts that create cells themselves (`hostDrop`, `hostPlace`, `hostChange`…) and
+   * then give them the focus: say that `id` (a tab, or a node) was just opened from where the
+   * focus is now. Closing it while it still has the focus then goes back there, as for cells
+   * the workspace creates (`spawn`…; see `openers`). Call it once the cell is in the layout,
+   * just before moving the focus to it (`activateTab`, `select`): it is forgotten as soon as
+   * the focus is somewhere else than in it.
+   */
+  markOpened(id: string): void {
+    this.noteOpener(id);
+  }
+
+  /** Remember where the focus is now, for `id`, a cell about to be created (see `openers`). */
+  private noteOpener(id: string): void {
+    const tree = this.selection.range ? null : this.treeOf(this.selection.id);
+    const active = ((tree && pathTo(tree, this.selection.id)) ?? []).flatMap((n) => {
+      if (n.type !== "pane") return [];
+      // (A host may have made the new tab active already: the one that had the focus before.)
+      let t: Tab | undefined = n.tabs[n.active];
+      if (t?.id === id) t = this.mostRecent(`focus:${n.id}`, n.tabs.filter((x) => x.id !== id)) ?? n.tabs.find((x) => x.id !== id);
+      return t ? [{ paneId: n.id, tabId: t.id }] : [];
+    });
+    const parent = [...this.openers.keys()].find((k) => this.hasFocusIn(k));
+    this.openers.set(id, { selection: { ...this.selection }, active, parent });
+  }
+
+  /** Forget the openers of cells the focus has left (see `openers`). */
+  private pruneOpeners(): void {
+    if (!this.openers.size) return;
+    const keep = new Set<string>();
+    for (const id of this.openers.keys())
+      if (this.hasFocusIn(id)) for (let k: string | undefined = id; k && !keep.has(k); k = this.openers.get(k)?.parent) keep.add(k);
+    for (const id of [...this.openers.keys()]) if (!keep.has(id)) this.openers.delete(id);
   }
 
   /** Record `id` as the most recently activated under `key`. */
@@ -568,8 +627,14 @@ export class Workspace {
    * Returns the pane that ends up holding it, or null.
    */
   place(spec: PlaceSpec, what: Placeable): string | null {
+    // Something new, getting the focus: closing it goes back to where the focus was.
+    const fresh = spec.focus !== false && this.subjectOf(what)?.kind === "external" ? what.id : null;
+    if (fresh) this.noteOpener(fresh);
     const result = this.placeDrop(spec, what);
-    if (!result) return null;
+    if (!result) {
+      if (fresh) this.openers.delete(fresh);
+      return null;
+    }
     this.commitDrop(result, undefined, undefined, spec.focus !== false);
     return result.paneId;
   }
@@ -777,7 +842,7 @@ export class Workspace {
     // A name: into that pane's own tabs (even if it shows a group).
     const dest = this.paneByName(to);
     const subject = dest && dest.id !== src.id ? this.subjectOf({ id }) : null;
-    return subject && this.tryDrop(subject, { kind: "tab", paneId: dest!.id, index: dest!.tabs.length });
+    return subject && this.tryDrop(subject, afterActive(dest!));
   }
 
   /**
@@ -802,6 +867,7 @@ export class Workspace {
       const tab = this.spawnTab();
       if (!tab) return null;
       const pane: PaneNode = { type: "pane", id: genId("p"), weight: 1, tabs: [tab], active: 0 };
+      this.noteOpener(tab.id);
       this.record(() => this.setTrees([...this.trees(), pane], [...this.floating, { root: pane, rect }], pane.id));
       return this.cell(pane.id);
     }, null);
@@ -827,8 +893,9 @@ export class Workspace {
     const tab = this.newTab(from);
     if (!tab) return null;
     const subject = this.subjectOf(tab);
-    const result = subject && this.tryDrop(subject, { kind: "tab", paneId, index: i + 1 });
+    const result = subject && this.tryDrop(subject, { kind: "tab", paneId, index: i + 1, near: true });
     if (!result) return null;
+    this.noteOpener(tab.id);
     this.commitDrop(result);
     return this.cell(result.paneId);
   }
@@ -848,7 +915,8 @@ export class Workspace {
 
   /**
    * Where something put *into* a node goes (a new cell, a moved tab or pane): as its kind
-   * absorbs it (`NodeKind.absorb`), following deferrals. By default: a pane's tabs; a stream's
+   * absorbs it (`NodeKind.absorb`), following deferrals. By default: a pane's tabs, just after its active
+   * one; a stream's
    * cell defers to its stream, which inserts things just after it; a pane showing a group, to
    * the group's layout; a plain split, to its most recently focused child; a prompt, to its
    * column (just before it). Null: nowhere.
@@ -921,10 +989,17 @@ export class Workspace {
     return this.runClose({ kind: "tab", id: tabId, tabIds: [tabId], linked }, closeTabWith(ft.pane.tabs[ft.index], this.lifecycle));
   }
 
-  /** The other members of the complex a tab is merged in (none: not merged). */
+  /**
+   * The other members of the complex a tab is merged in (none: not merged), as where the
+   * focus would go if it closed prefers them: those to its right, in order, then those to its
+   * left, nearest first (so the first is the one to its right, else the rightmost).
+   */
   private linkedWith(tabId: string): string[] {
     const ft = this.findTab(tabId);
-    return ft ? complexAt(ft.pane, ft.index).tabs.filter((t) => t.id !== tabId).map((t) => t.id) : [];
+    if (!ft) return [];
+    const ids = complexAt(ft.pane, ft.index).tabs.map((t) => t.id);
+    const i = ids.indexOf(tabId);
+    return [...ids.slice(i + 1), ...ids.slice(0, i).reverse()];
   }
 
   /**
@@ -1074,9 +1149,14 @@ export class Workspace {
     return this.closeChange(
       (forest) => {
         if (del(forest) === false) return false;
-        const a = next?.activate;
-        const p = a && find(forest, a.paneId)?.node;
-        if (p?.type === "pane") p.active = Math.max(0, p.tabs.findIndex((t) => t.id === a!.tabId));
+        for (const a of next?.activate ?? []) {
+          const p = find(forest, a.paneId)?.node;
+          const i = p?.type === "pane" ? p.tabs.findIndex((t) => t.id === a.tabId) : -1;
+          if (i >= 0) (p as PaneNode).active = i;
+        }
+        // (A pane to go into, once its tab is active again: as `enter` goes, e.g. to its prompt.)
+        const e = next?.enter && find(forest, next.select)?.node;
+        if (e && e.type === "pane") picked = this.enter(e);
         // (Once it's gone: what a closing merged tab held may have gone to another member.)
         if (next?.linked) picked = this.lastFocusedIn(forest, next.linked);
       },
@@ -1110,24 +1190,55 @@ export class Workspace {
    * selection included, may be another member's); or a group holding the selection.
    */
   private hasFocus(op: CloseOp): boolean {
-    if (op.kind === "pane") {
-      const p = this.node(op.id);
-      return !!p && !!find(p, this.selection.id);
+    return this.hasFocusIn(op.id);
+  }
+
+  /** Whether the focus is in a tab (as `hasFocus` says), or in a node (by id). */
+  private hasFocusIn(id: string): boolean {
+    const ft = this.findTab(id);
+    if (!ft) {
+      const n = this.node(id);
+      return !!n && !!find(n, this.selection.id);
     }
-    const ft = this.findTab(op.id);
-    if (!ft) return false;
-    if (ft.pane.tabs[ft.pane.active]?.id === op.id && find(ft.pane, this.selection.id)) return true;
+    if (ft.pane.tabs[ft.pane.active]?.id === id && find(ft.pane, this.selection.id)) return true;
     const g = ft.pane.tabs[ft.index].group;
     return !!g && !!find(g, this.selection.id);
   }
 
   /**
-   * Where the focus goes when a tab that has it closes. Walking up from what disappears, the
-   * first parent with something left decides:
-   *  - a pane (tab group): its other tab that had the focus last (else the most recently
-   *    activated one, else the one before). A merged tab: one of the complex's other members,
-   *    if any;
-   *  - a plain split: its most recently focused other child (else a neighbour);
+   * Where the focus goes back to when a cell just created closes while it has the focus (see
+   * `openers`): the cell closing (a tab, or a pane), or the pane it empties, or a tab of the
+   * pane closing. Null if none of them has an opener, or if it is in what closes.
+   */
+  private backToOpener(op: CloseOp): { select: string; activate: { paneId: string; tabId: string }[]; enter?: boolean } | null {
+    this.pruneOpeners();
+    const ft = op.kind === "tab" ? this.findTab(op.id) : null;
+    const pane = ft ? ft.pane : (this.node(op.id) as PaneNode | null);
+    if (pane?.type !== "pane") return null;
+    // What disappears: the pane, if it goes; else the closing tab's group, if any.
+    const empties = !ft || (pane.tabs.length === 1 && !staysEmpty(pane));
+    const gone: LayoutNode | undefined = empties ? pane : ft!.pane.tabs[ft!.index].group;
+    const candidates = ft ? [op.id, ...(empties ? [pane.id] : [])] : [op.id, ...pane.tabs.map((t) => t.id)];
+    for (const id of candidates) {
+      const o = this.openers.get(id);
+      if (!o || !this.hasFocusIn(id)) continue;
+      const there = (nid: string) => !!this.node(nid) && !(gone && find(gone, nid));
+      const activate = o.active.filter((a) => a.tabId !== op.id && there(a.paneId));
+      if (there(o.selection.id)) return { select: o.selection.id, activate };
+      // (What had the focus is gone, e.g. replaced: the innermost pane around it that's left.)
+      const p = activate.at(-1);
+      return p ? { select: p.paneId, activate, enter: true } : null;
+    }
+    return null;
+  }
+
+  /**
+   * Where the focus goes when a tab that has it closes. A cell just created, that the focus
+   * hasn't left since: back to where the focus was (see `openers`). Otherwise, walking up
+   * from what disappears, the first parent with something left decides:
+   *  - a pane (tab group): the tab to the right of the closed one, else the rightmost. A
+   *    merged tab: likewise among the complex's other members, if any;
+   *  - a plain split: the child after it (right, or down), else the last one;
    *  - a scroll split: the neighbour that moves into the closed one's place, i.e. the one
    *    further from its sticky end (after it, or before it if it sticks to its end);
    *  - in a complex (a merged tab, or the layout of one): the cell that had the focus last in
@@ -1136,7 +1247,9 @@ export class Workspace {
    *  - a tree's root (a window closing): the most recently selected pane left elsewhere.
    * The focus then goes down to a pane, through what was last focused in what was picked.
    */
-  private focusAfterClose(op: CloseOp): { select: string; activate?: { paneId: string; tabId: string }; linked?: string[] } | null {
+  private focusAfterClose(op: CloseOp): { select: string; activate?: { paneId: string; tabId: string }[]; linked?: string[]; enter?: boolean } | null {
+    const back = this.backToOpener(op);
+    if (back) return back;
     const idx = this.index();
     let pane: PaneNode;
     let gone: string | null;
@@ -1155,11 +1268,13 @@ export class Workspace {
       const others = members.length ? members : all;
       if (others.length) {
         const i = pane.tabs.findIndex((t) => t.id === gone);
-        const before = others.filter((t) => pane.tabs.indexOf(t) < i).at(-1) ?? others[0];
-        const tab = this.mostRecent(`focus:${pane.id}`, others) ?? this.mostRecent(`tabs:${pane.id}`, others) ?? before;
+        // The tab to its right, else the rightmost. A merged tab has already left its complex
+        // (moved to its end): `linked` has the members in that order, from before it moved.
+        const first = members.length && op.linked!.map((id) => members.find((t) => t.id === id)).find(Boolean);
+        const tab = first || (others.find((t) => pane.tabs.indexOf(t) > i) ?? others.at(-1)!);
         const inner = tab.group?.children[0];
         const linked = members.length ? members.map((t) => t.id) : undefined;
-        return { select: inner ? this.descend(inner) : pane.id, activate: { paneId: pane.id, tabId: tab.id }, linked };
+        return { select: inner ? this.descend(inner) : pane.id, activate: [{ paneId: pane.id, tabId: tab.id }], linked };
       }
       // A pane that stays, empty (a tab of it closed): the focus too.
       if (gone !== null && staysEmpty(pane)) return { select: pane.id };
@@ -1181,9 +1296,10 @@ export class Workspace {
         const i = kids.indexOf(x);
         if (kids.length > 1) {
           const k = kind(parent);
-          const order = k.scroll ? (isSticky(parent) ? [i - 1, i + 1] : [i + 1, i - 1]) : [i - 1, i + 1];
-          const near = order.map((j) => kids[j]).find(Boolean)!;
-          const pick = k.scroll ? near : (this.mostRecent(parent.id, kids.filter((c) => c !== x)) ?? near);
+          // The one after it (right/down), else the last; a scroll split sticking to its end:
+          // the one before it, which moves into its place.
+          const order = k.scroll && isSticky(parent) ? [i - 1, i + 1] : [i + 1, i - 1];
+          const pick = order.map((j) => kids[j]).find(Boolean)!;
           return { select: this.descend(pick), linked: this.complexAround(parent.id) };
         }
         x = parent;
