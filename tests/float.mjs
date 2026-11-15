@@ -19,7 +19,7 @@ await bbb.dblclick(); await state("dblclick again");
 const grip = page.locator(".carreau-pane", { has: page.locator(".carreau-tab", { hasText: /^Counter A$/ }) }).locator(".carreau-more");
 await grip.click();
 console.log("menu items:", await page.locator(".carreau-menu button").allTextContents());
-await page.locator(".carreau-menu button", { hasText: "Float" }).click();
+await page.locator(".carreau-menu > button", { hasText: /^Float$/ }).click();
 await state("after Float");
 await page.screenshot({ path: "/tmp/float1.png" });
 // move the float quickly (no hold) => stays floating

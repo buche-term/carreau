@@ -14,18 +14,24 @@ await page.screenshot({ path: "/tmp/close.png", clip: { x: 160, y: 560, width: 6
 console.log("start:          ", await layout());
 await closeOf("model.ts").click(); await settle();
 console.log("close model.ts: ", await layout());
-await closeOf("Outline").click(); await settle();
+// The Outline pane's bar is folded (a lone unnamed tab): its × is on the pane's corner (see foldclose.mjs).
+await page.locator(".carreau-pane", { has: page.locator(".carreau-tab", { hasText: /^Outline$/ }) }).locator(":scope > .carreau-cell-close").click(); await settle();
 console.log("close Outline:  ", await layout());
 await page.locator(".carreau-tab", { hasText: /^Problems$/ }).click({ button: "middle" }); await settle();
 console.log("middle Problems:", await layout());
 // float Terminal, then close its only tab => window closes
 const term = page.locator(".carreau-pane", { has: page.locator(".carreau-tab", { hasText: /^Terminal$/ }) });
+// Its bar folded with the lone tab (the ⋯ folds with it): click the wedge to bring it back.
+await term.locator(".carreau-tabbar-fold").click(); await settle();
 await term.locator(".carreau-more").click();
-await page.locator(".carreau-menu button", { hasText: "Float" }).click();
+await page.locator(".carreau-menu > button", { hasText: /^Float$/ }).click();
 console.log("floated:        ", await layout());
 await closeOf("Terminal").click(); await settle();
 console.log("close in window:", await layout());
 // close everything down to the last tab
-for (const t of ["Files", "Search", "Git", "main.ts", "view.ts"]) { await closeOf(t).click(); await settle(); }
+for (const t of ["Files", "Search"]) { await closeOf(t).click(); await settle(); }
+// Git is alone, its bar folded: the pane's corner × closes it (and the pane with it).
+await page.locator(".carreau-pane", { has: page.locator(".carreau-tab", { hasText: /^Git$/ }) }).locator(":scope > .carreau-cell-close").click(); await settle();
+for (const t of ["main.ts", "view.ts"]) { await closeOf(t).click(); await settle(); }
 console.log("almost empty:   ", await layout(), "| close button on last tab:", await closeOf("README.md").count());
 await browser.close();

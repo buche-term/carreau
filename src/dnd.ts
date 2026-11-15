@@ -27,7 +27,6 @@ import {
   intersect,
   isSplit,
   kind,
-  paneDisplay,
   panes,
   shape,
   sideAxis,
@@ -408,12 +407,17 @@ export class DragDrop {
       const thirds: [Side, number][] = (
         [["left", fx], ["right", 1 - fx], ["top", fy], ["bottom", 1 - fy]] as [Side, number][]
       ).filter(([, f]) => f < 1 / 3);
-      if (thirds.length) {
+      // The center icons first: side by side, they can reach an edge third in a narrow pane.
+      const onIcon = Z.centers.find((c) => Math.hypot(px - c.cx, py - c.cy) <= c.r);
+      if (onIcon) {
+        d.inCenter = true;
+        d.active = onIcon.choice;
+      } else if (thirds.length) {
         thirds.sort((a, b) => a[1] - b[1]);
         d.active = Z.sides[thirds[0][0]] ?? null;
       } else {
         d.inCenter = true;
-        d.active = Z.centers.find((c) => Math.hypot(px - c.cx, py - c.cy) <= c.r)?.choice ?? null;
+        d.active = null;
       }
     }
     // Mini lines: they pop out after the cursor stays on a line for a moment; they go when it
@@ -677,7 +681,7 @@ export class DragDrop {
     const sides: Zones["sides"] = {};
     for (const side of SIDES) sides[side] = this.zoneSide(e, side) ?? undefined;
     // Center icons. Over its own pane: float the dragged thing. Elsewhere: swap, plus a tab
-    // icon for a pane whose tab bar is hidden (no dots to drop on).
+    // icon to add the dragged tabs at its end (for an empty pane: into it).
     const s = this.state!.subject;
     const st = this.draggedTabs();
     const own = (s.kind === "pane" && s.paneId === paneId) || st?.pane === pane;
@@ -685,8 +689,7 @@ export class DragDrop {
       ? [["float", { kind: "float", paneId }]]
       : [
           ["swap", { kind: "swap", paneId }],
-          // (Also for an empty pane: into it.)
-          ...(paneDisplay(pane, e.ctx).showTabBar && pane.tabs.length ? [] : [["tab", { kind: "tab", paneId, index: pane.tabs.length }] as [Zones["centers"][number]["kind"], DropTarget]]),
+          ["tab", { kind: "tab", paneId, index: pane.tabs.length }],
           // Merge with its active tab, if the dragged tab can.
           ...(st && st.tabs.every((t) => canMerge(pane, pane.active, t)) ? [["link", { kind: "merge", tabId: pane.tabs[pane.active].id }] as [Zones["centers"][number]["kind"], DropTarget]] : []),
         ];
@@ -883,8 +886,7 @@ export class DragDrop {
         const ft = this.ws.trees().map((tr) => findTab(tr, t.tabId)).find(Boolean);
         if (ft) outline(host.visRect(ft.pane.id));
       } else if (t.kind === "tab") {
-        // Into a tab bar: the highlighted dot is the preview; into a pane with no tab bar
-        // (the center tab icon): outline the pane.
+        // Into a tab bar: the highlighted dot is the preview; into the center tab icon: outline the pane.
         if (d.zones?.centers.some((z) => z.choice === c)) outline(host.visRect(t.paneId));
       } else if (c.straddle) {
         // Last third of the node before, first third of the one after.

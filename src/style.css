@@ -401,6 +401,11 @@
 }
 .carreau-cell-close::before { content: "×"; }
 .carreau-cell-close:hover { color: light-dark(#1d1e22, #eee); background: light-dark(#e3e5ea, #3a3d48); }
+/* A folded pane (not a cell: it has its × either way) shows this × at its top right — the
+   tabs' are folded away with them. While its tabs close, the closing spinner sits in its
+   place (the `.pane-close` class makes the pane the anchor for both). */
+.carreau-pane.pane-close { position: relative; }
+.carreau-pane > .carreau-closing { position: absolute; top: 5px; right: 6px; z-index: 1; }
 /* a secondary focus: what cell operations act on, when not the selection (Workspace.operand) */
 .carreau.nav-mode .carreau-pane.secondary { outline: 1px dotted light-dark(#8a8d98, #80838d); outline-offset: -2px; }
 .carreau-long.over-text { cursor: text; }

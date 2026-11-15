@@ -20,12 +20,14 @@ console.log("on the tab icon:", await page.evaluate(() => window.view.drag.activ
 await page.screenshot({ path: "/tmp/cells-tabicon.png", clip: { x: c.x, y: c.y, width: c.width, height: c.height } });
 await page.mouse.up();
 console.log("ls cell tabs now:", (await tabsOf("ls")).join(","), "| tab bar:", await cellPane("ls").locator(":scope > .carreau-tabbar").isVisible());
-// 2. drag the "make test" cell by its long strip below "Explain"
+// 2. drag the "make test" cell by its long strip below "Explain", onto the ls cell's swap icon
 const long = await cellPane("make test").locator(":scope > .carreau-body > .carreau-long").boundingBox();
 const g = await cellPane("ls").boundingBox();
 await page.mouse.move(long.x + 50, long.y + 5); await page.mouse.down();
 await page.mouse.move(long.x + 80, long.y + 40, { steps: 5 });
-await page.mouse.move(g.x + g.width / 2, g.y + g.height * 0.62, { steps: 8 });
+await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2, { steps: 8 });
+const swap = await page.evaluate(() => { const z = window.view.drag.zones.centers.find((z) => z.kind === "swap"); const b = document.querySelector(".carreau").getBoundingClientRect(); return [z.cx + b.left, z.cy + b.top]; });
+await page.mouse.move(swap[0], swap[1], { steps: 4 });
 console.log("dragging by long:", await page.evaluate(() => `${window.view.drag?.subject.kind} → ${window.view.drag?.active?.target.kind}:${window.view.drag?.active?.target.side}`));
 await page.mouse.up();
 console.log("cells:", await page.evaluate(() => [...document.querySelectorAll(".carreau-scroll > [data-id]")].map((e) => e.querySelector(".carreau-tab-short")?.textContent).join(", ")));

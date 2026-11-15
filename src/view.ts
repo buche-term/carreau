@@ -740,6 +740,16 @@ export class View implements DndHost {
     if (activeTab) el.style.setProperty("--focus-accent", cellAccent(activeTab));
     else el.style.removeProperty("--focus-accent");
     const kids = this.decorateScrollCell(el, node, cell);
+    // A folded bar leaves only the tabs' 2px line and the wedge: no tab × within reach, so
+    // the pane shows one of its own at the top right (cells have theirs either way). While a
+    // tab closes, its spinner takes its place (the tabs' spinners are folded away too). Not
+    // when the pane shows a group: the cells inside reach that corner, their ×'s among them.
+    const folded = !cell && this.isBarCollapsed(node) && !activeGroup(node);
+    const foldedClosing = folded ? node.tabs.find((t) => this.ws.isClosing(t.id)) : undefined;
+    const foldedClose = folded && !foldedClosing && this.ws.canClosePane(node.id);
+    if (foldedClosing) kids.push(this.closingSpinner(foldedClosing.id, `fold:${node.id}`));
+    else if (foldedClose) kids.push(this.paneClose(node));
+    el.classList.toggle("pane-close", !!foldedClosing || foldedClose);
     const bar = this.tabBar(node);
     bar.hidden = !display.showTabBar;
     el.classList.toggle("no-tabbar", !display.showTabBar);
@@ -839,7 +849,15 @@ export class View implements DndHost {
     gutter.classList.toggle("resizes", resizes);
     setAttr(gutter, "title", resizes ? "Drag to resize; double-click: natural height" : null);
     if (!this.ws.canClosePane(node.id) || node.tabs.some((t) => this.ws.isClosing(t.id))) return [gutter];
-    const close = this.parts.get(`cell-close:${node.id}`, node.id, (cur) => {
+    return [gutter, this.paneClose(node)];
+  }
+
+  /**
+   * The pane's × at its top right, which closes the pane: a scroll cell always has one; so
+   * does a pane whose bar is folded, where the tabs (and their ×) are folded away.
+   */
+  private paneClose(node: PaneNode): HTMLElement {
+    return this.parts.get(`cell-close:${node.id}`, node.id, (cur) => {
       const c = span("carreau-cell-close");
       c.title = "Close";
       c.addEventListener("pointerdown", (e) => e.stopPropagation()); // not a drag, nor a selection
@@ -849,7 +867,6 @@ export class View implements DndHost {
       });
       return c;
     });
-    return [gutter, close];
   }
 
   /**
