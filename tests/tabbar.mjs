@@ -99,4 +99,24 @@ await name("Docs");
 console.log("a name unfolds it too:", (await outlineHeight()) === "27px");
 await name(null);
 console.log("…un-naming folds it back:", (await outlineHeight()) === "2px");
+
+// A group the user makes is not a stray single tab: its bar starts open, since that is where
+// its name goes (and where it is typed). Escape cancels the grouping, as it does the name.
+await outline.evaluate((p) => window.view.groupAndName({ id: p.dataset.id }));
+await page.waitForTimeout(100);
+const holder = page.locator(`.carreau-pane[data-id="${await page.evaluate(() => window.ws.selection.id)}"]`);
+console.log(
+  "a new group's bar starts open:",
+  (await holder.locator(":scope > .carreau-tabbar").evaluate((b) => getComputedStyle(b).height)) === "27px",
+  "the name being typed is readable:",
+  (await page.locator(".carreau-tab-edit").count()) === 1,
+);
+await page.keyboard.press("Escape");
+await page.waitForTimeout(100);
+console.log(
+  "Escape takes the group back:",
+  (await holder.count()) === 0,
+  "the Outline pane is on its own, folded again:",
+  (await outlineHeight()) === "2px",
+);
 await browser.close();

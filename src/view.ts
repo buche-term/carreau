@@ -940,7 +940,8 @@ export class View implements DndHost {
     // (in the active tab's accent): a click brings the bar back, a drag moves the pane (the
     // bar's other handles are gone then). The tabs stay in the bar either way: the shortcuts
     // keep working. A single unnamed tab starts folded (a tab joining, or a name, unfolds it)
-    // — a click pins the fold either way, and the pin sticks (see `isBarCollapsed`).
+    // — a click pins the fold either way, and the pin sticks (see `isBarCollapsed`). A group
+    // that was just made is the exception: `groupAndName` opens its bar, its name is the point.
     const collapsed = this.isBarCollapsed(node);
     const fold = this.parts.get(`fold:${node.id}`, data, (cur) => {
       const fold = div("carreau-tabbar-fold");
@@ -1059,8 +1060,8 @@ export class View implements DndHost {
     this.render();
   }
 
-  /** Unfold a pane's tab bar if it's collapsed (a drag resting on its wedge: see the dnd),
-   *  pinned open like a click on the wedge. */
+  /** Unfold a pane's tab bar if it's folded (a drag resting on its wedge: see the dnd; a new
+   *  group's bar: see `groupAndName`), pinned open like a click on the wedge. */
   expandTabBar(paneId: string): void {
     const node = this.ws.node(paneId);
     if (node?.type !== "pane" || !this.isBarCollapsed(node)) return;
@@ -1449,8 +1450,13 @@ export class View implements DndHost {
   groupAndName(selection?: Selection): void {
     if (!this.ws.group(randomWord(), selection)) return;
     const holder = this.ws.node(this.ws.selection.id);
+    if (holder?.type !== "pane") return;
+    // A group you asked for shows its name: its bar starts open, pinned (its single tab being
+    // unnamed would otherwise fold it to 2px, where the name being typed can't be read). The
+    // holders normalization wraps around scroll splits keep the automatic fold.
+    this.expandTabBar(holder.id);
     // Naming is part of grouping: Escape, or an empty name, cancels the grouping itself.
-    if (holder?.type === "pane") this.editTabTitle(holder.tabs[holder.active].id, () => this.ws.discardLastStep());
+    this.editTabTitle(holder.tabs[holder.active].id, () => this.ws.discardLastStep());
   }
 
   /**
