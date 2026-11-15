@@ -86,6 +86,9 @@ configurePrompts(ws, { submit: (text) => ({ id: genId("t"), title: text, content
 - `ws.lifecycle` — what happens when tabs close, when a cell spawns from another cell, etc.
 - `ws.placer(...)` / `Cell` / `Placer` — place things relative to the focused cell.
 - `bridgeFrameKeys(iframe)` — let keyboard navigation work across same-origin iframes.
+- `carreauActions` (also `carreau/actions`, without the view) — the layout actions keys and menus run: each one's title, description, categories, parameters, `run` and `enabled`. Old names (`insertLeft`, `focusUp`…) are aliases.
+- `ActionRef` — an action by id and arguments (`{ id: "insert", args: { target: "left" } }`): bind one to a key in `NavConfig`, or put one in a menu. `refKey` compares resolved ones.
+- View options `shortcutFor` (the shortcut a menu item shows), `runAction` (run menu items through your own registry) and `menuItems` (your own items in pane and tab menus, as `MenuEntry`s).
 
 > Without `Element.moveBefore` (older browsers), everything still works — iframes simply
 > reload when dragged between panes.
