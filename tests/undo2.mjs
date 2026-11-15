@@ -16,12 +16,13 @@ await dragSplitter(0, 40); await dragSplitter(0, 40); await dragSplitter(0, -20)
 console.log("splitter 1 x3:      ", await widths());
 await dragSplitter(1, -60);
 console.log("splitter 2:         ", await widths());
-await page.keyboard.down("Alt"); await page.keyboard.press("KeyQ"); await page.keyboard.press("KeyQ"); await page.keyboard.up("Alt");
+await page.keyboard.down("Alt"); await page.keyboard.press("KeyQ");
 await page.keyboard.press("ArrowRight"); // navigation: not a step
 await page.keyboard.press("KeyZ");
 console.log("Z (undo splitter 2):", await widths());
 await page.keyboard.press("KeyZ");
 console.log("Z (undo splitter 1):", await widths(), (await widths()) === w0 ? "= start" : "");
 await page.keyboard.press("Shift+KeyZ");
+await page.keyboard.up("Alt");
 console.log("Shift+Z:            ", await widths());
 await browser.close();

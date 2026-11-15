@@ -241,7 +241,7 @@ export class View implements DndHost {
   private opts: Required<Pick<ViewOptions, "renderTab">> & ViewOptions;
   readonly dnd: DragDrop;
   /** Navigation mode (driven by the keyboard controller). */
-  private navMode: "off" | "held" | "sticky" = "off";
+  private navMode: "off" | "held" = "off";
   private menu: HTMLElement | null = null;
   private menuAnchor: HTMLElement | null = null;
   /** What the user made of each pane's bar fold (true: folded, false: open). Their say sticks;
@@ -1546,10 +1546,9 @@ export class View implements DndHost {
   }
 
   /** Enter or leave navigation mode (see keyboard.ts). */
-  setNavMode(mode: "off" | "held" | "sticky"): void {
+  setNavMode(mode: "off" | "held"): void {
     this.navMode = mode;
     this.el.classList.toggle("nav-mode", mode !== "off");
-    this.el.classList.toggle("nav-sticky", mode === "sticky");
   }
 
   // -------------------------------------------------------------------------

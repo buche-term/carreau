@@ -1,8 +1,7 @@
 // Keyboard navigation mode.
 //
 // An activation chord (e.g. Alt+Q) enters navigation mode for as long as the modifier is
-// held. Pressing the activation key again while still holding the modifier (Alt+Q, Q) makes
-// the mode sticky: it then lasts until the activation key (or Escape) is pressed again.
+// held (its key, pressed again meanwhile, does nothing: releasing the modifier leaves).
 // While in navigation mode, plain keys (with the activation modifier held or not) run
 // actions. Nothing is hard-coded: the activation chord and all bindings come from the config.
 //
@@ -108,7 +107,7 @@ export interface NavConfig {
   shortcuts?: Record<string, Shortcut>;
 }
 
-export type NavMode = "off" | "held" | "sticky";
+export type NavMode = "off" | "held";
 
 /**
  * Forward a same-origin iframe's key events to the host window, so that the navigation keys
@@ -305,18 +304,10 @@ export class KeyboardNav {
       return this.shortcut(e, inField);
     }
 
+    // The mode's own key, again while the modifier is held: nothing (the mode lasts as long as
+    // the modifier does). Swallowed all the same: it is not a key of its own.
     if (e.code === activation.code) {
       e.preventDefault();
-      if (e.repeat) return;
-      // Activation key again: while still holding the modifier, become sticky; when sticky,
-      // leave navigation mode.
-      if (this.mode === "held") this.setMode("sticky");
-      else this.setMode("off");
-      return;
-    }
-    if (e.key === "Escape" && this.mode === "sticky") {
-      e.preventDefault();
-      this.setMode("off");
       return;
     }
 

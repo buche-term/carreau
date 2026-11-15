@@ -30,14 +30,13 @@ await page.keyboard.up("Alt");
 console.log("release Ctrl:     ", await st());
 await page.keyboard.press("ArrowLeft");
 console.log("→ when off (no-op)", await st());
-// sticky mode
+// the mode's key again, still holding: nothing; the mode lasts while the modifier is held
 await page.keyboard.down("Alt");
 await page.keyboard.press("KeyQ");
 await page.keyboard.press("KeyQ");
-await page.keyboard.up("Alt");
-console.log("Ctrl+Q Q, release:", await st());
+console.log("Alt+Q Q (held):     ", await st());
 await page.keyboard.press("ArrowUp");
-console.log("↑ (sticky)        ", await st());
+console.log("↑ (still in mode)   ", await st());
 await page.keyboard.press("KeyS"); await page.keyboard.press("ArrowDown");
 console.log("Alt+↓ swap        ", await st(), "| column:", await page.evaluate(() => window.ws.root.children[1].children.map((p) => p.tabs[0].title).join(",")));
 // drag a pane from anywhere inside (its body) onto Outline's center swap
@@ -49,6 +48,6 @@ await page.mouse.move(out.x + out.width * 0.5, out.y + out.height * 0.85, { step
 console.log("drag body ->      ", await page.evaluate(() => window.view.drag?.active?.target.kind + ":" + window.view.drag?.active?.target.side));
 await page.mouse.up();
 console.log("layout:", await page.evaluate(() => { const show = (n) => (n.type === "pane" ? n.tabs.map((t) => t.title).join("+") : `${n.type}(${n.children.map(show).join(", ")})`); return show(window.ws.root); }));
-await page.keyboard.press("KeyQ");
-console.log("Q leaves sticky:  ", await st());
+await page.keyboard.up("Alt");
+console.log("release Alt:      ", await st());
 await browser.close();

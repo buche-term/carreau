@@ -10,7 +10,6 @@ const selectPrompt = () => page.evaluate(() => { const q = [...(function* w(n) {
 const state = () => page.evaluate(() => { const ps = [...(function* w(n) { yield n; for (const c of n.children ?? []) yield* w(c); for (const t of n.tabs ?? []) if (t.group) yield* w(t.group); })(window.ws.root)].filter((n) => n.type === "pane"); return ps.map((p) => (p.name ? `[${p.name}] ` : "") + p.tabs.map((t) => t.title).join("+")).join(" | "); });
 for (const [key, typed, label] of [["Percent", "Chat", "% (rename tab)"], ["KeyN", "talk", "N (name pane)"]]) {
   await selectPrompt();
-  await page.keyboard.down("Alt"); await page.keyboard.press("KeyQ"); await page.keyboard.up("Alt"); await page.keyboard.press("KeyQ");
   await page.waitForTimeout(100);
   await page.evaluate((a) => window.nav.run(a), key === "Percent" ? "renameTab" : "namePane");
   await page.waitForTimeout(100);

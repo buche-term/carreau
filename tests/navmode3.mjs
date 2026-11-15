@@ -10,8 +10,8 @@ const st = () => page.evaluate(() => {
   return `${document.querySelector("#status").textContent.match(/^\[[^\]]*\]/)?.[0] ?? "[off]"} sel=${sel}  grid: ${grid}`;
 });
 await page.locator(".carreau-tab", { hasText: /^B2$/ }).click();
-await page.keyboard.down("Alt"); await page.keyboard.press("KeyQ"); await page.keyboard.press("KeyQ"); await page.keyboard.up("Alt");
-console.log("sticky:              ", await st());
+await page.keyboard.down("Alt"); await page.keyboard.press("KeyQ");
+console.log("held:                ", await st());
 // one-shot prefix: S then →
 await page.keyboard.press("KeyS");
 console.log("S pressed:           ", await st());
@@ -41,8 +41,8 @@ await page.keyboard.press("KeyP");
 console.log("P (parent):          ", await st());
 await page.keyboard.press("ArrowUp");
 console.log("↑ from parent:       ", await st());
-// held mode also: Alt held, S, ←
-await page.keyboard.press("KeyQ");
+// released, then entered again: Alt held, S, ←
+await page.keyboard.up("Alt");
 await page.keyboard.down("Alt"); await page.keyboard.press("KeyQ");
 await page.keyboard.press("KeyS"); await page.keyboard.press("ArrowLeft");
 await page.keyboard.up("Alt");

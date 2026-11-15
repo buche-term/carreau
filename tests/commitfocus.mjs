@@ -12,13 +12,13 @@ const state = () => page.evaluate(() => {
   return `selected: ${n.tabs[n.active].title} | focus: ${inFrame} | nav: ${window.nav.mode}`;
 });
 const counterA = page.frameLocator("iframe").nth(2); // Big Buck Bunny, Me at the zoo, Counter A
-// select Counter A, then a round of sticky navigation mode
+// select Counter A, then a round of navigation mode (Alt held)
 await page.evaluate(() => { const p = window.ws.trees().flatMap(function all(n) { return n.type === "pane" ? [n] : n.children.flatMap(all); }).find((p) => p.tabs.some((t) => t.title === "Counter A")); window.ws.activateTab(p.id, 0); });
-await page.keyboard.down("Alt"); await page.keyboard.press("KeyQ"); await page.keyboard.press("KeyQ"); await page.keyboard.up("Alt");
-console.log("sticky nav mode:        ", await state());
-await page.keyboard.press("Escape");
+await page.keyboard.down("Alt"); await page.keyboard.press("KeyQ");
+console.log("nav mode (Alt held):    ", await state());
+await page.keyboard.up("Alt");
 await page.waitForTimeout(100);
-console.log("left it (Esc):          ", await state());
+console.log("left it (Alt up):       ", await state());
 await page.keyboard.type("hello");
 console.log("typed: input =", JSON.stringify(await counterA.locator("input").inputValue()));
 // Alt+Q from inside the iframe: navigation mode, focus back in the host

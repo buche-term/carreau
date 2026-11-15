@@ -15,10 +15,10 @@ await page.keyboard.type("$ whoami"); await page.keyboard.press("Enter");
 await page.keyboard.type("why is the sky blue"); await page.keyboard.press("Enter");
 await page.waitForTimeout(100);
 console.log("typed two:", await cells(), "|", await state());
-// Alt+Q from the field: navigation mode, the field let go, the secondary focus shows
-await page.keyboard.down("Alt"); await page.keyboard.press("KeyQ"); await page.keyboard.press("KeyQ"); await page.keyboard.up("Alt");
+// Alt+Q from the field: navigation mode (Alt held), the field let go, the secondary focus shows
+await page.keyboard.down("Alt"); await page.keyboard.press("KeyQ");
 await page.waitForTimeout(100);
-console.log("Alt+Q, Q:", await state(), "|", await cells());
+console.log("Alt+Q:", await state(), "|", await cells());
 await page.screenshot({ path: "/tmp/prompt-nav.png" });
 await page.keyboard.press("KeyW");
 await page.waitForTimeout(150);
@@ -28,9 +28,9 @@ console.log("W (closes the secondary):", await cells(), "|", await state());
 await page.keyboard.press("ArrowUp");
 console.log("↑:", await state(), "|", await cells());
 await page.keyboard.press("ArrowDown");
-await page.keyboard.press("Escape");
+await page.keyboard.up("Alt");
 await page.waitForTimeout(100);
-console.log("↓, Esc:", await state());
+console.log("↓, Alt up:", await state());
 await page.keyboard.type("x");
 console.log("typed x: field =", JSON.stringify(await page.locator(".carreau-prompt-input").inputValue()));
 // many cells: the prompt stays visible at the bottom, the column at its end

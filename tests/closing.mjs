@@ -31,8 +31,7 @@ console.log("forced:", await sidebar());
 // a shell cell (no tab bar): closes after a while, with the spinner on its strip
 const ls = page.locator(".carreau-scroll > .carreau-pane").first();
 await ls.locator(".carreau-long").click();
-await page.keyboard.down("Alt"); await page.keyboard.press("KeyQ"); await page.keyboard.press("KeyQ"); await page.keyboard.up("Alt");
-await page.keyboard.press("KeyW");
+await page.keyboard.down("Alt"); await page.keyboard.press("KeyQ"); await page.keyboard.press("KeyW"); await page.keyboard.up("Alt");
 await page.waitForTimeout(150);
 console.log("ls closing: strip spinner", await ls.locator(".carreau-long .carreau-closing").count());
 const lb = await ls.boundingBox();

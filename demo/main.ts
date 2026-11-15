@@ -29,7 +29,7 @@ function duplicateTab({ ws }: NavContext): void {
   }, null);
 }
 
-// Navigation mode: hold Alt after Alt+Q (or Alt+Q, Q for sticky mode), then use these.
+// Navigation mode: hold Alt after Alt+Q, then use these.
 const navConfig: NavConfig = {
   // side: "left" | "right" | "either" (default): which Alt key counts.
   activation: { modifier: "Alt", code: "KeyQ", side: "either" },
@@ -231,10 +231,7 @@ const label = (k: string) =>
     .replace("Left", "←")
     .replace("Up", "↑")
     .replace("Down", "↓");
-const legend: [string, string][] = [
-  ["Alt+Q", "navigation mode (hold Alt)"],
-  ["Alt+Q Q", "sticky navigation mode (Q / Esc to leave)"],
-];
+const legend: [string, string][] = [["Alt+Q", "navigation mode (hold Alt)"]];
 // Group bindings by action, for a compact legend.
 // (A command of the host's own is named by its function.)
 const actionName = (a: NavBinding) => (typeof a === "function" ? a.name : a);
@@ -261,7 +258,7 @@ const refresh = () => {
   if (document.activeElement !== json) json.value = serialize(ws.floating.length ? ws.data() : ws.root);
   const s = ws.selection;
   status.textContent =
-    (nav.mode !== "off" ? `[NAV${nav.mode === "sticky" ? " · sticky" : ""}${nav.prefix ? ` · ${label(nav.prefix)}…` : ""}] ` : "") +
+    (nav.mode !== "off" ? `[NAV${nav.prefix ? ` · ${label(nav.prefix)}…` : ""}] ` : "") +
     `selection: ${ws.node(s.id)?.type} ${s.id}${s.range ? ` [${s.range.join("–")}]` : ""}` +
     (ws.maximized ? ` · maximized: ${ws.maximized.id}${ws.maximized.range ? ` [${ws.maximized.range.join("–")}]` : ""}` : "");
 };
