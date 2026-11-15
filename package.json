@@ -36,7 +36,7 @@
       "types": "./src/index.ts",
       "import": "./dist/index.js"
     },
-    "./actions": { "source": "./src/actions.ts", "types": "./src/actions.ts", "import": "./dist/actions.js" },
+    "./actions": { "bun": "./src/actions.ts", "source": "./src/actions.ts", "types": "./src/actions.ts", "import": "./dist/actions.js" },
     "./prompt-view": {
       "source": "./src/prompt-view.ts",
       "types": "./src/prompt-view.ts",
