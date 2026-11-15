@@ -2,6 +2,7 @@
 // persistent tab contents, floating windows, the pane menu, in-place editing, and CSS-only
 // selection & maximization. Drag & drop is in dnd.ts.
 
+import { ActionRef, FALLBACK_FLOAT, carreauActions } from "./actions";
 import { cellAccent } from "./colors";
 import { DndHost, DragDrop, LINK_PATHS } from "./dnd";
 import {
@@ -42,12 +43,34 @@ export interface ViewOptions {
    * hint. Made once per pane and kept while it stays empty (like a tab's content).
    */
   renderEmpty?: (pane: PaneNode) => HTMLElement | null;
+  /** The shortcut to show for an action in a menu: text ("⌥Q W"), or an element the
+   *  host rendered (e.g. keycaps). */
+  shortcutFor?: (ref: ActionRef, ctx: MenuContext) => string | Node | undefined;
+  /** Runs a menu's action instead of carreau (the host's registry may wrap carreau's). */
+  runAction?: (ref: ActionRef, ctx: MenuContext) => void;
+  /** The host's own items for a pane's or a tab's menu, shown before "Send to". */
+  menuItems?: (kind: "pane" | "tab", ctx: { node: string; tab?: string }) => MenuEntry[];
+}
+
+/** What a context menu is about: its pane, and its tab (a tab's menu). */
+export interface MenuContext {
+  node?: string;
+  tab?: string;
+}
+
+/** A menu item given by reference. `label` is required for an action carreau does not define. */
+export interface MenuEntry {
+  ref: ActionRef;
+  label?: string;
+  enabled?: boolean;
 }
 
 /** A menu's item: an action, or a "Send to" submenu (for a tab or a pane, by id). */
 type MenuButton = (label: string, enabled: boolean, run: () => void, cls?: string) => HTMLButtonElement;
 type MenuItem =
   | { label: string; enabled?: boolean; run: () => void }
+  /** An action, by reference (see `carreauActions`, and `ViewOptions.runAction`). */
+  | MenuEntry
   | { label: string; sendTo: string }
   /** A submenu row: `sub` fills its body (`button`: make a menu button). */
   | { label: string; sub: (sub: HTMLElement, button: MenuButton) => void };
@@ -1286,58 +1309,44 @@ export class View implements DndHost {
    * at `at`.
    */
   private openMenu(node: PaneNode, at: { left?: number; top?: number; right?: number; bottom?: number }, anchor?: HTMLElement): void {
+    const ctx = { node: node.id };
     const items: MenuItem[] = [
       // Everything new around this pane, what nav's `i` opens (it takes the focused cell:
       // this pane takes it first). The arrows: a cell beside it on that side; Tab: one more
       // of them in its own tabs; Float: one in a window of its own.
       {
         label: "New",
-        sub: (sub, button) => {
+        sub: (sub) => {
           const arrows = Object.assign(document.createElement("div"), { className: "carreau-menu-arrows" });
-          for (const [side, glyph, name] of [
-            ["left", "←", "left"],
-            ["right", "→", "right"],
-            ["top", "↑", "up"],
-            ["bottom", "↓", "down"],
+          for (const [target, glyph] of [
+            ["left", "←"],
+            ["right", "→"],
+            ["up", "↑"],
+            ["down", "↓"],
           ] as const) {
-            const b = button(
-              glyph,
-              true,
-              () => {
-                this.ws.select({ id: node.id }, false);
-                this.ws.spawn({ split: side });
-              },
-              "carreau-menu-arrow",
-            );
-            b.title = `New cell to the ${name}`;
-            arrows.append(b);
+            const ref = { id: "insert", args: { target } };
+            arrows.append(this.refButton({ ref, label: glyph }, ctx, { cls: "carreau-menu-arrow", title: `New cell to the ${target}`, kbd: false }));
           }
           sub.append(arrows);
-          const tab = button("Tab", true, () => this.ws.spawnTabInto(node.id));
-          tab.title = "A new tab in this pane";
-          sub.append(tab);
-          const float = button("Float", true, () => {
-            this.ws.select({ id: node.id }, false);
-            this.ws.spawnFloat(this.floatRect(node.id) ?? { x: 40, y: 40, w: 420, h: 280 });
-          });
-          float.title = "A new cell in a new floating window";
-          sub.append(float);
+          sub.append(this.refButton({ ref: { id: "insert", args: { target: "tab" } }, label: "Tab" }, ctx, { title: "A new tab in this pane" }));
+          sub.append(this.refButton({ ref: { id: "insert", args: { target: "float" } }, label: "Float" }, ctx, { title: "A new cell in a new floating window" }));
         },
       },
-      { label: "Float", enabled: panes(this.ws.root).length > 1 && !!find(this.ws.root, node.id), run: () => this.floatPane(node.id) },
-      { label: "Group", run: () => this.groupAndName({ id: node.id }) },
+      { ref: { id: "float" } },
+      { ref: { id: "group" } },
     ];
-    if (this.ws.canCollapse(node.id)) items.push({ label: "Collapse group", run: () => this.ws.collapse(node.id) });
-    items.push({ label: "Close pane", enabled: this.ws.canClosePane(node.id), run: () => this.ws.closePane(node.id) });
+    if (this.ws.canCollapse(node.id)) items.push({ ref: { id: "collapse" } });
+    items.push({ ref: { id: "closePane" } });
     const sc = this.ws.scrollOf(node.id);
     if (sc && !kind(sc).alwaysSticky) {
       const [start, end] = kind(sc).axis === "row" ? ["left", "right"] : ["top", "bottom"];
-      items.push({ label: `Stick to ${sc.reverse ? start : end}`, run: () => this.ws.toggleReverse(sc.id) });
+      items.push({ ref: { id: "toggleStick" }, label: `Stick to ${sc.reverse ? start : end}` });
     }
-    items.push({ label: node.name ? "Rename pane…" : "Name pane…", run: () => this.editPaneName(node.id) });
-    if (node.name) items.push({ label: "Remove name", run: () => this.ws.namePane(node.id, null) });
+    items.push({ ref: { id: "namePane" }, label: node.name ? "Rename pane…" : "Name pane…" });
+    if (node.name) items.push({ ref: { id: "removePaneName" } });
+    items.push(...(this.opts.menuItems?.("pane", ctx) ?? []));
     items.push({ label: "Send to", sendTo: node.id });
-    this.showMenu(items, at, anchor);
+    this.showMenu(items, at, anchor, ctx);
   }
 
   /**
@@ -1345,29 +1354,25 @@ export class View implements DndHost {
    * in a window, close it, rename it, send it somewhere, collapse its group.
    */
   private openTabMenu(e: MouseEvent, node: PaneNode, t: Tab): void {
+    const ctx = { node: node.id, tab: t.id };
     const items: MenuItem[] = [
-      { label: "New tab", run: () => this.ws.spawnTabInto(node.id, t.id) },
-      {
-        label: "Float",
-        // The tab's pane is in the main tree, and pulling the tab out doesn't empty it (all
-        // of a lone pane's tabs float the pane itself, which the main tree cannot be).
-        enabled: !!find(this.ws.root, node.id) && (node.tabs.length > 1 || panes(this.ws.root).length > 1),
-        run: () => this.floatTab(node, t),
-      },
-      { label: "Close tab", enabled: this.ws.canCloseTab(t.id), run: () => this.ws.closeTab(t.id) },
-      { label: "Rename tab…", run: () => this.editTabTitle(t.id) },
+      { ref: { id: "insert", args: { target: "tab" } }, label: "New tab" },
+      { ref: { id: "float" } },
+      { ref: { id: "closeTab" } },
+      { ref: { id: "renameTab" } },
+      ...(this.opts.menuItems?.("tab", ctx) ?? []),
       { label: "Send to", sendTo: t.id },
     ];
-    if (t.group && this.ws.canCollapse(node.id)) items.push({ label: "Collapse group", run: () => this.ws.collapse(node.id) });
+    if (t.group && this.ws.canCollapse(node.id)) items.push({ ref: { id: "collapse" } });
     const b = this.el.getBoundingClientRect();
-    this.showMenu(items, { left: e.clientX - b.left, top: e.clientY - b.top });
+    this.showMenu(items, { left: e.clientX - b.left, top: e.clientY - b.top }, undefined, ctx);
   }
 
   /** Pull a tab out of its pane into a floating window of its own (all of a pane's tabs at
    *  once float the pane itself, as a drop of them all does). */
   floatTab(node: PaneNode, t: Tab): void {
     const result = this.ws.tryDrop({ kind: "tab", tabId: t.id }, { kind: "float", paneId: node.id });
-    if (result) this.ws.commitDrop(result, undefined, this.floatRect(node.id) ?? { x: 40, y: 40, w: 420, h: 280 });
+    if (result) this.ws.commitDrop(result, undefined, this.floatRect(node.id) ?? FALLBACK_FLOAT);
   }
 
   /**
@@ -1375,7 +1380,7 @@ export class View implements DndHost {
    * "Send to" item opens a submenu: arrows (to the neighbour on that side), then the named
    * panes. `anchor`: the button that opened it (it toggles it).
    */
-  private showMenu(items: MenuItem[], at: { left?: number; top?: number; right?: number; bottom?: number }, anchor?: HTMLElement): void {
+  private showMenu(items: MenuItem[], at: { left?: number; top?: number; right?: number; bottom?: number }, anchor: HTMLElement | undefined, ctx: MenuContext): void {
     this.closeMenu();
     const menu = Object.assign(document.createElement("div"), { className: "carreau-menu" });
     const button = (label: string, enabled: boolean, run: () => void, cls = "") => {
@@ -1387,8 +1392,9 @@ export class View implements DndHost {
       return b;
     };
     for (const it of items) {
-      if ("run" in it) menu.append(button(it.label, it.enabled !== false, it.run));
-      else if ("sendTo" in it) menu.append(this.sendToItem(it.label, it.sendTo, button));
+      if ("ref" in it) menu.append(this.refButton(it, ctx));
+      else if ("run" in it) menu.append(button(it.label, it.enabled !== false, it.run));
+      else if ("sendTo" in it) menu.append(this.sendToItem(it.label, it.sendTo, button, ctx));
       else menu.append(this.subItem(it.label, button, (sub) => it.sub(sub, button)));
     }
     for (const [k, v] of Object.entries(at)) if (v !== undefined) menu.style.setProperty(k, `${v}px`);
@@ -1403,13 +1409,63 @@ export class View implements DndHost {
     anchor?.classList.add("open");
   }
 
+  /**
+   * A menu button for an action, by reference: its label (the action's title, unless the entry
+   * says), its description as a tooltip, its shortcut (the host's: `ViewOptions.shortcutFor`),
+   * whether it is enabled here, and what it runs (the host's `runAction`, else carreau's).
+   * `title`: a tooltip instead of the description; `kbd: false`: the shortcut goes into the
+   * tooltip instead (no room for it).
+   */
+  private refButton(entry: MenuEntry, ctx: MenuContext, opts: { cls?: string; title?: string; kbd?: boolean } = {}): HTMLButtonElement {
+    let resolved: ActionRef | null = null;
+    try {
+      resolved = carreauActions.resolve(entry.ref.id, entry.ref.args);
+    } catch {
+      resolved = null; // (a host action)
+    }
+    const actx = { ws: this.ws, view: this, ...ctx };
+    const label = entry.label ?? (resolved ? carreauActions.title(resolved) : entry.ref.id);
+    const enabled = entry.enabled ?? (resolved ? carreauActions.enabled(actx, resolved) : !!this.opts.runAction);
+    const b = Object.assign(document.createElement("button"), { disabled: !enabled, className: opts.cls ?? "" });
+    b.append(document.createTextNode(label));
+    const shortcut = this.opts.shortcutFor?.(resolved ?? entry.ref, ctx);
+    if (opts.title !== undefined) {
+      const text = typeof shortcut === "string" ? shortcut : shortcut?.textContent;
+      b.title = opts.kbd === false && text ? `${opts.title} (${text})` : opts.title;
+    } else if (resolved) {
+      const d = carreauActions.description(resolved);
+      if (d !== label) b.title = d;
+    }
+    if (shortcut && opts.kbd !== false) {
+      if (typeof shortcut === "string") b.append(Object.assign(document.createElement("kbd"), { className: "carreau-menu-kbd", textContent: shortcut }));
+      else {
+        const span = Object.assign(document.createElement("span"), { className: "carreau-menu-kbd" });
+        span.append(shortcut);
+        b.append(span);
+      }
+    }
+    b.addEventListener("click", () => {
+      this.closeMenu();
+      if (this.opts.runAction) this.opts.runAction(resolved ?? entry.ref, ctx);
+      else if (resolved) carreauActions.run(actx, resolved);
+    });
+    return b;
+  }
+
+  /** A shortcut as text (for a tooltip), if the host gives one. */
+  private shortcutText(ref: ActionRef, ctx: MenuContext): string | undefined {
+    const s = this.opts.shortcutFor?.(ref, ctx);
+    return (typeof s === "string" ? s : s?.textContent) || undefined;
+  }
+
   /** A "Send to" item: its submenu (shown on hover) has the four sides, then the named panes. */
-  private sendToItem(label: string, id: string, button: MenuButton): HTMLElement {
+  private sendToItem(label: string, id: string, button: MenuButton, ctx: MenuContext): HTMLElement {
     return this.subItem(label, button, (sub) => {
       const arrows = Object.assign(document.createElement("div"), { className: "carreau-menu-arrows" });
       for (const [side, glyph] of [["left", "←"], ["right", "→"], ["up", "↑"], ["down", "↓"]]) {
         const b = button(glyph, this.ws.canSendTo(id, side), () => this.ws.sendTo(id, side), "carreau-menu-arrow");
-        b.title = `Send ${side}`;
+        const shortcut = this.shortcutText({ id: "sendTo", args: { target: side } }, ctx);
+        b.title = shortcut ? `Send ${side} (${shortcut})` : `Send ${side}`;
         arrows.append(b);
       }
       sub.append(arrows);

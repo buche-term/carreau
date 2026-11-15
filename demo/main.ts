@@ -181,7 +181,10 @@ ws.lifecycle = {
 configurePrompts(ws, { submit: promptCell, placeholder: "Type a prompt, or $ a command — Enter" });
 // The "Custom prompt" example: the host's own prompt editor.
 if (example.name === "Custom prompt") configurePrompts(ws, { editor: headedEditor });
+// Menu items' shortcuts (filled from the bindings, below).
+const shortcutMap = new Map<string, string>();
 const view = new View(ws, document.querySelector("#host")!, {
+  shortcutFor: (ref) => shortcutMap.get(refKey(ref)),
   renderTab: (tab) => {
     const data = tab.data ?? {};
     if (typeof data.youtube === "string" || typeof data.srcdoc === "string") {
@@ -232,6 +235,20 @@ const label = (k: string) =>
     .replace("Left", "←")
     .replace("Up", "↑")
     .replace("Down", "↓");
+// The shortcut of each action (bound by name or by reference), for the menus.
+{
+  const add = (chord: string, a: NavBinding) => {
+    if (typeof a === "function") return;
+    try {
+      const key = refKey(typeof a === "string" ? carreauActions.resolve(a) : carreauActions.resolve(a.id, a.args));
+      if (!shortcutMap.has(key)) shortcutMap.set(key, `Alt+Q ${chord}`);
+    } catch {
+      // (not an action)
+    }
+  };
+  for (const [k, a] of Object.entries(navConfig.bindings)) add(label(k), a);
+  for (const [p, table] of Object.entries(navConfig.prefixes ?? {})) for (const [k, a] of Object.entries(table)) add(`${label(p)} ${label(k)}`, a);
+}
 const legend: [string, string][] = [["Alt+Q", "navigation mode (hold Alt)"]];
 // Group bindings by action, for a compact legend.
 // (A command of the host's own is named by its function.)

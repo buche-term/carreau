@@ -191,6 +191,9 @@
 }
 .carreau-menu button:hover:not(:disabled) { background: light-dark(#eceef3, #3a3e4e); }
 .carreau-menu button:disabled { color: light-dark(#aaa, #666); cursor: default; }
+/* An item's shortcut (see `ViewOptions.shortcutFor`), at its right. */
+.carreau-menu button:has(> .carreau-menu-kbd) { display: flex; justify-content: space-between; gap: 16px; }
+.carreau-menu-kbd { font: inherit; font-size: 11px; opacity: 0.6; white-space: nowrap; }
 /* "Send to": a submenu, on hover (on the side where there's room): the four sides, then names.
    It stays open a beat after the pointer leaves (see `sendToItem`), so a slow or crooked path
    still gets there. */
