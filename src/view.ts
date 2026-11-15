@@ -1365,7 +1365,7 @@ export class View implements DndHost {
 
   /** Pull a tab out of its pane into a floating window of its own (all of a pane's tabs at
    *  once float the pane itself, as a drop of them all does). */
-  private floatTab(node: PaneNode, t: Tab): void {
+  floatTab(node: PaneNode, t: Tab): void {
     const result = this.ws.tryDrop({ kind: "tab", tabId: t.id }, { kind: "float", paneId: node.id });
     if (result) this.ws.commitDrop(result, undefined, this.floatRect(node.id) ?? { x: 40, y: 40, w: 420, h: 280 });
   }

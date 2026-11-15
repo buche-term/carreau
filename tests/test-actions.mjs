@@ -58,5 +58,66 @@ const throws = (fn, re) => { try { fn(); return false; } catch (e) { return !re 
   check("aliases", Object.keys(reg.aliases()).join() === "goLeft,goIntoLeft");
 }
 
+// Carreau's actions.
+{
+  const { carreauActions: A } = await server.ssrLoadModule("/src/actions.ts");
+  const D = ["Left", "Right", "Up", "Down"];
+  const oldNames = [
+    // Command (workspace.ts)
+    "nextTab", "prevTab", "parent", "root", "child", "undo", "redo",
+    ...D.map((d) => `focus${d}`), ...D.map((d) => `expand${d}`), "unexpand", ...D.map((d) => `swap${d}`), "maximize", "restore",
+    // NavAction (keyboard.ts)
+    "toggleMaximize", "float", "closeTab", "closePane", "forceCloseTab", "group", "collapse", "renameTab", "namePane",
+    "mark", "moveMarked", "clear", "growWidth", "shrinkWidth", "growHeight", "shrinkHeight", "insertInto", "insertFloat",
+    ...D.map((d) => `insert${d}`), ...D.map((d) => `insertInto${d}`), ...D.map((d) => `move${d}`), ...D.map((d) => `moveInto${d}`),
+  ];
+  const bad = oldNames.filter((n) => throws(() => A.resolve(n)));
+  check(`every old name resolves (${oldNames.length})${bad.length ? `: not ${bad.join(", ")}` : ""}`, !bad.length);
+  check("insertIntoLeft's key", refKey(A.resolve("insertIntoLeft")) === "insert?into=true&target=left");
+  check("insert {target: left} = insertLeft", refKey(A.resolve("insert", { target: "left" })) === refKey(A.resolve("insertLeft")));
+  check("insert {target: tab, into: true} throws", throws(() => A.resolve("insert", { target: "tab", into: true })));
+  check("insertLeft's title", A.title(A.resolve("insertLeft")) === "New cell to the left");
+  const defs = A.list();
+  check("every definition has lowercase categories", defs.every((d) => d.categories.length && d.categories.every((c) => c === c.toLowerCase())));
+  check("forceCloseTab is advanced", A.get("forceCloseTab").categories.includes("advanced"));
+  check("every definition has a description", defs.every((d) => d.description !== undefined));
+  check("insertIntoUp's description", A.description(A.resolve("insertIntoUp")) === "Open a new tab in the pane above, or in a new pane there if there is none");
+  check("resize's description", A.description(A.resolve("shrinkHeight")) === "Make the focused cell shorter");
+
+  // Behavior, with a workspace (actions that need the view can't run here).
+  const { Workspace } = await server.ssrLoadModule("/src/workspace.ts");
+  const { row, pane, serialize, clone } = await server.ssrLoadModule("/src/model.ts");
+  const tree = row([pane(["a", "b"]), pane(["c", "d"])]);
+  const make = () => {
+    const ws = new Workspace(clone(tree));
+    ws.select({ id: ws.root.children[0].id });
+    return ws;
+  };
+  const same = (a, b) => serialize(a.root) === serialize(b.root) && JSON.stringify(a.selection) === JSON.stringify(b.selection);
+  const run = (ws, name, args) => A.run({ ws, view: null }, A.resolve(name, args));
+  {
+    const a = make(), b = make();
+    run(a, "focus", { target: "right" });
+    b.run("focusRight");
+    check("focus {target: right} = ws.run(focusRight)", same(a, b) && a.selection.id !== make().selection.id);
+  }
+  {
+    const a = make(), b = make();
+    run(a, "nextTab");
+    b.run("nextTab");
+    check("nextTab = ws.run(nextTab)", same(a, b));
+  }
+  {
+    const a = make(), b = make();
+    const before = serialize(a.root);
+    run(a, "swap", { target: "right" });
+    b.run("swapRight");
+    const swapped = same(a, b) && serialize(a.root) !== before;
+    run(a, "undo");
+    b.run("undo");
+    check("swap then undo = the workspace's", swapped && same(a, b) && serialize(a.root) === before);
+  }
+}
+
 await server.close();
 if (fails) { console.log(`${fails} failure(s)`); process.exit(1); }

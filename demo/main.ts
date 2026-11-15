@@ -10,6 +10,7 @@ import { headedEditor } from "./prompteditor";
 import { deserialize, genId, serialize } from "../src/model";
 import { hasMoveBefore, View } from "../src/view";
 import { Workspace } from "../src/workspace";
+import { carreauActions, refKey } from "../src/actions";
 import { bridgeFrameKeys, KeyboardNav, NavBinding, NavConfig, NavContext } from "../src/keyboard";
 // Prompt columns (an optional module): their rendering, and their configuration below.
 import "../src/prompt-view";
@@ -234,12 +235,12 @@ const label = (k: string) =>
 const legend: [string, string][] = [["Alt+Q", "navigation mode (hold Alt)"]];
 // Group bindings by action, for a compact legend.
 // (A command of the host's own is named by its function.)
-const actionName = (a: NavBinding) => (typeof a === "function" ? a.name : a);
+const actionName = (a: NavBinding) => (typeof a === "function" ? a.name : typeof a === "string" ? a : refKey(a));
 const byAction = new Map<string, string[]>();
 for (const [k, a] of Object.entries(navConfig.bindings)) byAction.set(actionName(a), [...(byAction.get(actionName(a)) ?? []), label(k)]);
 for (const [a, ks] of byAction) legend.push([ks.join(" "), a]);
 for (const [k, sc] of Object.entries(navConfig.shortcuts ?? {}))
-  legend.push([`${label(k)} (anytime)`, actionName(typeof sc === "object" ? sc.run : sc)]);
+  legend.push([`${label(k)} (anytime)`, actionName(typeof sc === "object" && "run" in sc ? sc.run : sc)]);
 for (const [p, table] of Object.entries(navConfig.prefixes ?? {})) {
   const byA = new Map<string, string[]>();
   for (const [k, a] of Object.entries(table)) byA.set(actionName(a), [...(byA.get(actionName(a)) ?? []), label(k)]);

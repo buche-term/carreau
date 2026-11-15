@@ -8,9 +8,9 @@
 // A host with its own key handling can drive the mode instead: construct the controller
 // with no target (no keys are listened for), then `setMode` (and `run` for the actions).
 
-import { LayoutNode, PaneNode, Side } from "./model";
+import { ActionRef, carreauActions } from "./actions";
 import { View } from "./view";
-import { Command, Direction, Selection, Workspace } from "./workspace";
+import { Command, Workspace } from "./workspace";
 
 type Dir = "Left" | "Right" | "Up" | "Down";
 export type NavAction =
@@ -53,11 +53,11 @@ export type NavAction =
   | `moveInto${Dir}`;
 
 /**
- * What a key does in navigation mode: a built-in action (by name), or the host's own command, a
- * function given the workspace, the view and the controller. (Its `name` labels it, e.g. in
- * a legend.)
+ * What a key does in navigation mode: a built-in action (by name, or by reference: see
+ * `carreauActions`), or the host's own command, a function given the workspace, the view and
+ * the controller. (Its `name` labels it, e.g. in a legend.)
  */
-export type NavBinding = NavAction | ((ctx: NavContext) => void);
+export type NavBinding = NavAction | ActionRef | ((ctx: NavContext) => void);
 
 /** A shortcut: what it does, and whether it also works while typing in a text field. */
 export type Shortcut = NavBinding | { run: NavBinding; inFields?: boolean };
@@ -67,13 +67,6 @@ export interface NavContext {
   view: View;
   nav: KeyboardNav;
 }
-
-const DIRS: Record<Dir, { side: Side; dir: Direction }> = {
-  Left: { side: "left", dir: "left" },
-  Right: { side: "right", dir: "right" },
-  Up: { side: "top", dir: "up" },
-  Down: { side: "bottom", dir: "down" },
-};
 
 export type Modifier = "Control" | "Alt" | "Meta" | "Shift";
 
@@ -359,7 +352,7 @@ export class KeyboardNav {
     if (/^(Alt|Control|Meta|Shift)(Left|Right)$/.test(e.code)) return;
     const found = lookup(this.config.shortcuts, fullChord(e));
     if (!found) return;
-    const s = typeof found === "object" ? found : { run: found };
+    const s = typeof found === "object" && "run" in found ? found : { run: found };
     if (inField && !s.inFields) return;
     e.preventDefault();
     e.stopPropagation();
@@ -393,34 +386,6 @@ export class KeyboardNav {
     }
   }
 
-  /** The node cell operations act on (see `Workspace.operand`). */
-  private operand() {
-    const op = this.ws.operand();
-    return op && !op.range ? this.ws.node(op.id) : null;
-  }
-
-  /** If a prompt is selected, a selection of its column. */
-  private promptColumnSelection(): Selection | null {
-    const sel = this.ws.selection;
-    if (sel.range || this.ws.node(sel.id)?.type !== "prompt") return null;
-    const col = this.ws.index().parent(sel.id);
-    return col ? { id: col.id } : null;
-  }
-
-  /**
-   * The pane the selection is in: a selected pane, else the pane holding it (a prompt: its
-   * column's). Naming acts on it, not on the operand: what's named is what's selected, even
-   * where cell operations are redirected (a prompt's go to the cell above it).
-   */
-  private selectedPane(): PaneNode | null {
-    const sel = this.ws.selection;
-    if (sel.range) return null;
-    const idx = this.ws.index();
-    let n: LayoutNode | null = idx.node(sel.id);
-    while (n && n.type !== "pane") n = idx.parent(n.id);
-    return n;
-  }
-
   /** Leave navigation mode (for commands that end it). `commit`: the focused cell takes the focus. */
   leave(commit = true): void {
     this.setMode("off", commit);
@@ -428,103 +393,12 @@ export class KeyboardNav {
 
   run(action: NavBinding): void {
     if (typeof action === "function") return action({ ws: this.ws, view: this.view, nav: this });
-    const ws = this.ws;
-    switch (action) {
-      case "toggleMaximize":
-        ws.toggleMaximize();
-        return;
-      // Cell operations act on the operand: usually the selection (see `Workspace.operand`).
-      case "float": {
-        const n = this.operand();
-        if (n?.type === "pane") this.view.floatPane(n.id);
-        return;
-      }
-      case "group":
-        // Group now, then edit the new tab's title in place (keys typed in the field are
-        // ignored by this controller). From a prompt, it groups the prompt's column, not the
-        // operand.
-        this.view.groupAndName(this.promptColumnSelection() ?? undefined);
-        return;
-      case "renameTab": {
-        const p = this.selectedPane();
-        const tab = p?.tabs[p.active];
-        if (tab) this.view.editTabTitle(tab.id);
-        return;
-      }
-      case "collapse":
-        ws.collapse();
-        return;
-      case "closeTab": {
-        const n = this.operand();
-        if (n?.type === "pane") {
-          const tab = (n as PaneNode).tabs[(n as PaneNode).active];
-          // (A pane with no tabs, which stays when emptied (named, kept): the pane itself.)
-          if (tab) ws.closeTab(tab.id);
-          else ws.closePane(n.id);
-        }
-        return;
-      }
-      case "closePane": {
-        const n = this.operand();
-        if (n) ws.closePane(n.id);
-        return;
-      }
-      case "forceCloseTab": {
-        const n = this.operand();
-        if (n?.type === "pane") {
-          const tab = (n as PaneNode).tabs[(n as PaneNode).active];
-          if (tab && (ws.isClosing(tab.id) || ws.canCloseTab(tab.id))) ws.forceClose(tab.id);
-          else if (!tab) ws.closePane(n.id);
-        }
-        return;
-      }
-      case "growWidth":
-      case "shrinkWidth":
-      case "growHeight":
-      case "shrinkHeight": {
-        const axis = action.endsWith("Width") ? "row" : "column";
-        // (A cell's current size, when it has none of its own: measured.)
-        ws.resizeFocus(axis, action.startsWith("grow") ? 1 : -1, (id) => {
-          const r = this.view.pxRect(id);
-          return r && (axis === "row" ? r.w : r.h);
-        });
-        return;
-      }
-      case "mark":
-        ws.toggleMark();
-        return;
-      case "moveMarked":
-        ws.moveMarked();
-        return;
-      case "namePane": {
-        const p = this.selectedPane();
-        if (p) this.view.editPaneName(p.id);
-        return;
-      }
-      case "clear":
-        void ws.clear();
-        return;
-      case "insertFloat": {
-        // Where the focused cell is (80% of it, centered), or near the workspace's corner.
-        const op = ws.operand();
-        const n = op && !op.range ? ws.node(op.id) : null;
-        const pane = n && (n.type === "pane" ? n.id : ws.descend(n));
-        ws.spawnFloat((pane ? this.view.floatRect(pane) : null) ?? { x: 40, y: 40, w: 420, h: 280 });
-        return;
-      }
-      case "insertInto":
-        // Into the focused cell's tabs (a split: its most recently focused pane's).
-        ws.spawn({ split: "tab" });
-        return;
-      default: {
-        const m = /^(insert|move)(Into)?(Left|Right|Up|Down)$/.exec(action);
-        if (!m) return ws.run(action as Command);
-        const { side, dir } = DIRS[m[3] as Dir];
-        // Into a neighbour's tabs: if there is none on that side, where it would be.
-        const spec = m[2] ? { split: "tab" as const, base: dir, force: true } : { split: side };
-        if (m[1] === "insert") ws.spawn(spec);
-        else ws.moveTab(spec);
-      }
+    let ref: ActionRef;
+    try {
+      ref = typeof action === "string" ? carreauActions.resolve(action) : carreauActions.resolve(action.id, action.args);
+    } catch {
+      return; // (as before: an unknown action does nothing)
     }
+    carreauActions.run({ ws: this.ws, view: this.view }, ref);
   }
 }
