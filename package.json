@@ -36,6 +36,7 @@
       "types": "./src/index.ts",
       "import": "./dist/index.js"
     },
+    "./actions": { "source": "./src/actions.ts", "types": "./src/actions.ts", "import": "./dist/actions.js" },
     "./prompt-view": {
       "source": "./src/prompt-view.ts",
       "types": "./src/prompt-view.ts",
@@ -55,7 +56,7 @@
     "build": "tsc --noEmit && vite build && tsc -p tsconfig.build.json",
     "prepare": "vite build && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "node tests/test-ws.mjs && node tests/test-drop.mjs",
+    "test": "node tests/test-ws.mjs && node tests/test-drop.mjs && node tests/test-actions.mjs",
     "serve:test": "vite --config vite.config.ts demo --port 5317 --strictPort"
   },
   "devDependencies": {

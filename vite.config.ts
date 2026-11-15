@@ -27,7 +27,7 @@ export default defineConfig({
     sourcemap: true, // a UI backbone: consumers (e.g. buche) want real stack traces
     lib: {
       // "prompt-view" is optional (it registers the prompt renderer): its own entry.
-      entry: { index: "src/index.ts", "prompt-view": "src/prompt-view.ts" },
+      entry: { index: "src/index.ts", "prompt-view": "src/prompt-view.ts", actions: "src/actions.ts" },
       formats: ["es"],
     },
     rollupOptions: { output: { entryFileNames: "[name].js", chunkFileNames: "chunks/[name].js" } },

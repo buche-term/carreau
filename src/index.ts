@@ -8,6 +8,7 @@ declare const __CARREAU_VERSION__: string;
 /** The version of this package (its `package.json` at build time). */
 export const VERSION: string = __CARREAU_VERSION__;
 
+export * from "./actions";
 export * from "./cells";
 export * from "./colors";
 export * from "./complex";
