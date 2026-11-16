@@ -16,6 +16,7 @@ export * from "./dnd";
 export * from "./geometry";
 export * from "./keyboard";
 export * from "./kinds";
+export * from "./menus";
 export * from "./model";
 export * from "./prompt";
 export * from "./tree";

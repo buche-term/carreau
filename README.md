@@ -88,7 +88,7 @@ configurePrompts(ws, { submit: (text) => ({ id: genId("t"), title: text, content
 - `bridgeFrameKeys(iframe)` — let keyboard navigation work across same-origin iframes.
 - `carreauActions` (also `carreau/actions`, without the view) — the layout actions keys and menus run: each one's title, description, categories, parameters, `run` and `enabled`. Old names (`insertLeft`, `focusUp`…) are aliases.
 - `ActionRef` — an action by id and arguments (`{ id: "insert", args: { target: "left" } }`): bind one to a key in `NavConfig`, or put one in a menu. `refKey` compares resolved ones.
-- View options `shortcutFor` (the shortcut a menu item shows), `runAction` (run menu items through your own registry) and `menuItems` (your own items in pane and tab menus, as `MenuEntry`s).
+- `PANE_MENU`, `TAB_MENU` — the context menus, as data (lists of actions, rows, submenus: see `src/menus.ts`). View options: `menus` (your own), `actions` (your registry, if it wraps carreau's), `shortcutFor` (the shortcut an item shows). An action's `visible` and `label` decide, from the menu's pane or tab, whether it shows and how it reads.
 
 > Without `Element.moveBefore` (older browsers), everything still works — iframes simply
 > reload when dragged between panes.

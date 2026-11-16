@@ -7,7 +7,7 @@
 //
 // (No DOM at import time: hosts can load this without the view.)
 
-import { find, findTab, panes } from "./model";
+import { find, findTab, kind, panes } from "./model";
 import type { LayoutNode, PaneNode, Side, Tab } from "./model";
 import type { View } from "./view";
 import type { Selection, Workspace } from "./workspace";
@@ -40,6 +40,10 @@ export interface ActionDef<C> {
   check?(args: Args): string | null;
   run(ctx: C, args: Args): void;
   enabled?(ctx: C, args: Args): boolean;
+  /** Whether a menu shows it here (absent: always). Keys ignore it. */
+  visible?(ctx: C, args: Args): boolean;
+  /** Its label in a menu, here ("Rename pane…" for a named one). Absent: the title. */
+  label?(ctx: C, args: Args): string;
 }
 
 /** Action definitions, by id, and aliases (old names) of references. */
@@ -120,6 +124,18 @@ export class ActionRegistry<C> {
     return !def?.enabled || def.enabled(ctx, ref.args ?? {});
   }
 
+  /** Whether a menu shows the action here (true when the definition says nothing). */
+  visible(ctx: C, ref: ActionRef): boolean {
+    const def = this.defs.get(ref.id);
+    return !def?.visible || def.visible(ctx, ref.args ?? {});
+  }
+
+  /** The action's label in a menu, here (its title when the definition has no `label`). */
+  label(ctx: C, ref: ActionRef): string {
+    const def = this.defs.get(ref.id);
+    return def?.label ? def.label(ctx, ref.args ?? {}) : this.title(ref);
+  }
+
   /** Run a resolved reference (nothing if the id is unknown). */
   run(ctx: C, ref: ActionRef): void {
     this.defs.get(ref.id)?.run(ctx, ref.args ?? {});
@@ -183,6 +199,12 @@ function selectedPane(ws: Workspace): PaneNode | null {
   let n: LayoutNode | null = idx.node(sel.id);
   while (n && n.type !== "pane") n = idx.parent(n.id);
   return n;
+}
+
+/** A menu's pane. */
+function menuPane(ctx: CarreauActionContext): PaneNode | null {
+  const n = ctx.node !== undefined ? ctx.ws.node(ctx.node) : null;
+  return n?.type === "pane" ? n : null;
 }
 
 /** A tab menu's pane and tab. */
@@ -288,6 +310,11 @@ carreauActions.define({
   categories: ["layout"],
   run: (ctx) => void (ctx.node !== undefined ? ctx.ws.collapse(ctx.node) : ctx.ws.collapse()),
   enabled: (ctx) => (ctx.node !== undefined ? ctx.ws.canCollapse(ctx.node) : true),
+  // In a menu: a pane holding a group; a tab's: that tab being the group.
+  visible(ctx) {
+    if (ctx.tab !== undefined) return !!menuTab(ctx)?.tab.group && ctx.node !== undefined && ctx.ws.canCollapse(ctx.node);
+    return ctx.node === undefined || ctx.ws.canCollapse(ctx.node);
+  },
 });
 
 carreauActions.define({
@@ -372,6 +399,7 @@ carreauActions.define({
     const p = selectedPane(ctx.ws);
     if (p) ctx.view.editPaneName(p.id);
   },
+  label: (ctx) => (menuPane(ctx)?.name ? "Rename pane…" : "Name pane…"),
 });
 
 carreauActions.define({
@@ -383,6 +411,7 @@ carreauActions.define({
     const id = ctx.node ?? selectedPane(ctx.ws)?.id;
     if (id !== undefined) ctx.ws.namePane(id, null);
   },
+  visible: (ctx) => ctx.node === undefined || !!menuPane(ctx)?.name,
 });
 
 carreauActions.define({
@@ -394,6 +423,18 @@ carreauActions.define({
     const id = ctx.node ?? selectedPane(ctx.ws)?.id;
     const sc = id !== undefined ? ctx.ws.scrollOf(id) : null;
     if (sc) ctx.ws.toggleReverse(sc.id);
+  },
+  // In a menu: a pane in a scroll stream that can stick either way; named after where it'll stick.
+  visible(ctx) {
+    if (ctx.node === undefined) return true;
+    const sc = ctx.ws.scrollOf(ctx.node);
+    return !!sc && !kind(sc).alwaysSticky;
+  },
+  label(ctx) {
+    const sc = ctx.node !== undefined ? ctx.ws.scrollOf(ctx.node) : null;
+    if (!sc) return "Stick to the other end";
+    const [start, end] = kind(sc).axis === "row" ? ["left", "right"] : ["top", "bottom"];
+    return `Stick to ${sc.reverse ? start : end}`;
   },
 });
 

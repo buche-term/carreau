@@ -117,6 +117,27 @@ const throws = (fn, re) => { try { fn(); return false; } catch (e) { return !re 
     b.run("undo");
     check("swap then undo = the workspace's", swapped && same(a, b) && serialize(a.root) === before);
   }
+
+  // Menus: what shows, and labels, from the context.
+  {
+    const ws = make();
+    const p = ws.root.children[0];
+    const ctx = { ws, view: null, node: p.id };
+    const ref = (n) => A.resolve(n);
+    check("namePane's label: unnamed", A.label(ctx, ref("namePane")) === "Name pane…");
+    check("removePaneName hidden on an unnamed pane", !A.visible(ctx, ref("removePaneName")));
+    ws.namePane(p.id, "foo");
+    check("namePane's label: named", A.label(ctx, ref("namePane")) === "Rename pane…");
+    check("removePaneName shown on a named pane", A.visible(ctx, ref("removePaneName")));
+    check("collapse hidden without a group", !A.visible(ctx, ref("collapse")));
+    check("toggleStick hidden out of a stream", !A.visible(ctx, ref("toggleStick")));
+    check("label: the title when the action has none", A.label(ctx, ref("closePane")) === "Close pane");
+    check("visible without a menu context", A.visible({ ws, view: null }, ref("removePaneName")));
+    const { PANE_MENU, TAB_MENU } = await server.ssrLoadModule("/src/menus.ts");
+    const names = (spec) => spec.flatMap((it) => ("action" in it ? [it] : "row" in it ? it.row : "submenu" in it ? it.items.flatMap((x) => ("row" in x ? x.row : [x])) : []));
+    const bad = [...names(PANE_MENU), ...names(TAB_MENU)].filter((it) => throws(() => A.resolve(it.action, it.args)));
+    check("the default menus name known actions", !bad.length);
+  }
 }
 
 await server.close();
