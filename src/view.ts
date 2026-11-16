@@ -4,7 +4,7 @@
 
 import { ActionRef, ActionRegistry, FALLBACK_FLOAT, carreauActions } from "./actions";
 import { cellAccent } from "./colors";
-import { MenuAction, MenuSpec, PANE_MENU, TAB_MENU, arrowRow } from "./menus";
+import { MenuAction, MenuSpec, PANE_MENU, TAB_MENU } from "./menus";
 import { DndHost, DragDrop, LINK_PATHS } from "./dnd";
 import {
   Ctx,
@@ -1364,7 +1364,22 @@ export class View implements DndHost {
       } else if ("submenu" in it) {
         const sub = Object.assign(document.createElement("div"), { className: "carreau-submenu" });
         if (this.fillMenu(sub, it.items, ctx)) item = this.subItem(it.submenu, sub);
-      } else item = this.sendToItem(it.sendTo, ctx);
+      } else {
+        // The named panes (but the menu's own), as of now: an action for each, on its name.
+        const { action, arg, args } = it.namedPanes;
+        const id = ctx.tab ?? ctx.node;
+        const names = this.ws
+          .trees()
+          .flatMap((t) => panes(t))
+          .filter((p) => p.name && p.id !== id && !p.tabs.some((x) => x.id === id))
+          .map((p) => p.name!)
+          .sort((a, b) => a.localeCompare(b));
+        const buttons = names.map((name) => this.actionButton({ action, args: { ...args, [arg]: name }, label: name }, ctx)).filter((b) => b !== null);
+        for (const b of buttons) b.classList.add("carreau-menu-name");
+        el.append(...buttons);
+        if (!names.length) el.append(Object.assign(document.createElement("div"), { className: "carreau-menu-note", textContent: "No named panes" }));
+        any = true;
+      }
       if (item) {
         el.append(item);
         any = true;
@@ -1418,22 +1433,6 @@ export class View implements DndHost {
       reg.run(actx, ref);
     });
     return b;
-  }
-
-  /** A "Send to" item: its submenu (shown on hover) has the four sides, then the named panes. */
-  private sendToItem(label: string, ctx: MenuContext): HTMLElement {
-    const id = ctx.tab ?? ctx.node;
-    const sub = Object.assign(document.createElement("div"), { className: "carreau-submenu" });
-    const names = this.ws
-      .trees()
-      .flatMap((t) => panes(t))
-      .filter((p) => p.name && p.id !== id && !p.tabs.some((x) => x.id === id))
-      .map((p) => p.name!)
-      .sort((a, b) => a.localeCompare(b));
-    this.fillMenu(sub, [arrowRow("sendTo"), ...names.map((name) => ({ action: "sendTo", args: { target: name }, label: name }))], ctx);
-    for (const b of sub.querySelectorAll(":scope > button")) b.classList.add("carreau-menu-name");
-    if (!names.length) sub.append(Object.assign(document.createElement("div"), { className: "carreau-menu-note", textContent: "No named panes" }));
-    return this.subItem(label, sub);
   }
 
   /**

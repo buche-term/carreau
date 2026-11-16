@@ -1,7 +1,8 @@
 // Context menus, as data: lists of actions (see actions.ts), rows of small buttons, submenus,
-// and the "Send to" submenu. Each action decides, from the menu's context (its pane, its tab),
-// whether it shows (`visible`), its label (`label`, else its title), whether it is enabled
-// (`enabled`), and what it does (`run`): a menu only says which actions, in what order.
+// and the named panes (an action for each, as of when the menu opens). Each action decides,
+// from the menu's context (its pane, its tab), whether it shows (`visible`), its label
+// (`label`, else its title), whether it is enabled (`enabled`), and what it does (`run`): a
+// menu only says which actions, in what order.
 //
 // The view shows `PANE_MENU` and `TAB_MENU` unless the host gives its own (`ViewOptions.menus`):
 // copy one and edit it, e.g. `[...TAB_MENU.slice(0, 4), { action: "myAction" }, ...]`.
@@ -22,8 +23,9 @@ export type MenuItemSpec =
   | { row: (MenuAction & { label: string })[] }
   /** A submenu, shown on hover (left out when none of its items shows). */
   | { submenu: string; items: MenuItemSpec[] }
-  /** The "Send to" submenu: the four sides, then the named panes (`sendTo` actions). */
-  | { sendTo: string };
+  /** The named panes but the menu's own, when it opens: `action` for each, its name as `arg`
+   *  (see `namedPanes`); "No named panes" if none. */
+  | { namedPanes: { action: string; arg: string; args?: Args } };
 
 export type MenuSpec = MenuItemSpec[];
 
@@ -32,6 +34,14 @@ export function arrowRow(action: string, args: Args = {}): { row: (MenuAction & 
   const glyphs = { left: "←", right: "→", up: "↑", down: "↓" };
   return { row: Object.entries(glyphs).map(([target, label]) => ({ action, args: { ...args, target }, label })) };
 }
+
+/** The named panes, each as `action` with its name as `arg` (and `args`): e.g. `sendTo`'s targets. */
+export function namedPanes(action: string, arg = "target", args: Args = {}): MenuItemSpec {
+  return { namedPanes: { action, arg, args } };
+}
+
+/** "Send to": the four sides, then the named panes. */
+export const SEND_TO: MenuItemSpec = { submenu: "Send to", items: [arrowRow("sendTo"), namedPanes("sendTo")] };
 
 /** A pane's menu (right click on the pane's chrome, or its ⋯ button). */
 export const PANE_MENU: MenuSpec = [
@@ -53,7 +63,7 @@ export const PANE_MENU: MenuSpec = [
   { action: "toggleStick" },
   { action: "namePane" },
   { action: "removePaneName" },
-  { sendTo: "Send to" },
+  SEND_TO,
 ];
 
 /**
@@ -66,6 +76,6 @@ export const TAB_MENU: MenuSpec = [
   { action: "float" },
   { action: "closeTab" },
   { action: "renameTab" },
-  { sendTo: "Send to" },
+  SEND_TO,
   { action: "collapse" },
 ];

@@ -134,7 +134,7 @@ const throws = (fn, re) => { try { fn(); return false; } catch (e) { return !re 
     check("label: the title when the action has none", A.label(ctx, ref("closePane")) === "Close pane");
     check("visible without a menu context", A.visible({ ws, view: null }, ref("removePaneName")));
     const { PANE_MENU, TAB_MENU } = await server.ssrLoadModule("/src/menus.ts");
-    const names = (spec) => spec.flatMap((it) => ("action" in it ? [it] : "row" in it ? it.row : "submenu" in it ? it.items.flatMap((x) => ("row" in x ? x.row : [x])) : []));
+    const names = (spec) => spec.flatMap((it) => ("action" in it ? [it] : "row" in it ? it.row : "submenu" in it ? names(it.items) : [{ action: it.namedPanes.action, args: { [it.namedPanes.arg]: "x" } }]));
     const bad = [...names(PANE_MENU), ...names(TAB_MENU)].filter((it) => throws(() => A.resolve(it.action, it.args)));
     check("the default menus name known actions", !bad.length);
   }
