@@ -1,6 +1,6 @@
 {
   "name": "carreau",
-  "version": "0.1.0",
+  "version": "0.1.3",
   "description": "A draggable, keyboard-navigable tiling workspace (panes, tabs, groups, prompts) for the web. No dependencies, no framework.",
   "type": "module",
   "license": "MIT",
@@ -36,7 +36,12 @@
       "types": "./src/index.ts",
       "import": "./dist/index.js"
     },
-    "./actions": { "bun": "./src/actions.ts", "source": "./src/actions.ts", "types": "./src/actions.ts", "import": "./dist/actions.js" },
+    "./actions": {
+      "bun": "./src/actions.ts",
+      "source": "./src/actions.ts",
+      "types": "./src/actions.ts",
+      "import": "./dist/actions.js"
+    },
     "./prompt-view": {
       "source": "./src/prompt-view.ts",
       "types": "./src/prompt-view.ts",
