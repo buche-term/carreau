@@ -819,6 +819,19 @@ export class Workspace {
   }
 
   /**
+   * Pin a pane's tab bar folded (true) or full (false), or give it back to the automatic rule
+   * (null; see `barMode`). Undoable, like any layout change. Returns whether it did.
+   */
+  foldPane(paneId: string, fold: boolean | null): boolean {
+    return this.change((forest) => {
+      const p = find(forest, paneId)?.node;
+      if (p?.type !== "pane" || (p.fold ?? null) === fold) return false;
+      if (fold === null) delete p.fold;
+      else p.fold = fold;
+    });
+  }
+
+  /**
    * Send a tab (by id), or a whole pane (its tabs), into another pane's tabs: the pane with
    * that name, or the neighbour of the pane holding it on that side ("left", "right", "up",
    * "down"; if there's none, where it would be). Like a drop: undoable; what's sent gets the

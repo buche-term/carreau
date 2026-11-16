@@ -28,12 +28,12 @@ console.log("after another click: still closing", await tab("build").locator(".c
 await tab("build").locator(".carreau-closing").click();
 await page.waitForTimeout(200);
 console.log("forced:", await sidebar());
-// a shell cell (no tab bar): closes after a while, with the spinner on its strip
+// a shell cell (no tab bar): closes after a while, with the spinner in its × place, over its strip
 const ls = page.locator(".carreau-scroll > .carreau-pane").first();
 await ls.locator(".carreau-long").click();
 await page.keyboard.down("Alt"); await page.keyboard.press("KeyQ"); await page.keyboard.press("KeyW"); await page.keyboard.up("Alt");
 await page.waitForTimeout(150);
-console.log("ls closing: strip spinner", await ls.locator(".carreau-long .carreau-closing").count());
+console.log("ls closing: corner spinner", await ls.locator(":scope > .carreau-closing").count(), "no ×:", (await ls.locator(":scope > .carreau-cell-close").count()) === 0);
 const lb = await ls.boundingBox();
 await page.screenshot({ path: "/tmp/closing-cell.png", clip: { x: lb.x, y: lb.y, width: lb.width, height: 60 } });
 await page.waitForTimeout(1400);

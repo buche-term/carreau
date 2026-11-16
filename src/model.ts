@@ -88,6 +88,7 @@ function validate(n: any): void {
     if (!Array.isArray(n.tabs)) throw new Error("Pane without tabs");
     if (n.size !== undefined && !(typeof n.size === "number" && n.size > 0)) throw new Error("A pane's size is a positive number");
     if (n.name !== undefined && (typeof n.name !== "string" || !n.name.trim())) throw new Error("A pane's name is a non-empty string");
+    if (n.fold !== undefined && typeof n.fold !== "boolean") throw new Error("A pane's fold is a boolean");
     n.active = Math.max(0, Math.min(n.active ?? 0, n.tabs.length - 1));
     for (const t of n.tabs) {
       if (t.group) validate(t.group);

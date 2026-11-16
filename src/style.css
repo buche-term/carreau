@@ -39,32 +39,45 @@
 .carreau-tabs-wrap::after { right: 0; background: linear-gradient(to left, light-dark(#0002, #000c), transparent); }
 .carreau-tabs-wrap.more-left::before, .carreau-tabs-wrap.more-right::after { opacity: 1; }
 .carreau-tabspace { flex: 1 0 24px; cursor: grab; }
-/* The fold button (▾), at the bar's right end, next to the ⋯; collapsed, the bar is just the
-   tabs' 2px top line (the active tab's highlight, at the pane's bottom edge), and the wedge
-   waits in the bottom-right corner, in the active tab's accent: click it to bring the bar
-   back, drag it to move the pane (the bar's other handles are hidden then). A single unnamed
-   tab starts folded — a tab joining, or a name, unfolds it — until a click pins the fold. */
+/* The fold button (▾), at the bar's left end (see CELL_WEDGE in view.ts): it folds the bar to its 2px, the
+   tabs' top line (the active tab's highlight, at the pane's bottom edge); the pane's wedge
+   (below) brings it back. The tabs stay in the bar: the tab shortcuts keep working. */
 .carreau-tabbar-fold {
   flex: none; display: flex; align-items: center; padding: 0 5px; cursor: pointer;
   color: light-dark(#8a8d96, #80838d); font-size: 14px; line-height: 1;
 }
 .carreau-tabbar-fold:hover { color: light-dark(#1d1e22, #eee); }
-.carreau-tabbar.collapsed { position: relative; overflow: visible; height: 2px; flex-basis: 2px; }
+.carreau-tabbar.collapsed { height: 2px; flex-basis: 2px; }
 /* Nothing of the tabs is painted but their box (they keep their width: the active tab's inset
    line, at the pane's bottom edge, marks it where it sits). */
 .carreau-tabbar.collapsed .carreau-tab > *, .carreau-tabbar.collapsed .carreau-tab-link { visibility: hidden; }
 .carreau-tabbar.collapsed .carreau-tabs-wrap::before, .carreau-tabbar.collapsed .carreau-tabs-wrap::after { display: none; }
-/* The collapsed fold: the right triangle over the pane's bottom-right corner (in the active
-   tab's accent) is painted by the pseudo-element — the box itself stays a plain, unclipped
-   square: the hit area, so it doesn't reach along the pane's edges into the resize hitboxes.
-   Its cursor stays a pointer (click first, drag second). */
-.carreau-tabbar.collapsed > .carreau-tabbar-fold {
-  position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; padding: 0;
-}
-.carreau-tabbar.collapsed > .carreau-tabbar-fold::before {
+/* What a pane shows of its own where its bar doesn't (see View.paneChrome): its × (or a
+   closing tab's spinner) at the top right, and the wedge, its handle, in a bottom corner: a
+   right triangle in the active tab's accent. Click it to bring the full bar back, drag it to
+   move the pane, rest a drag on it to unfold the bar. The triangle is the pseudo-element's:
+   the box itself stays a plain, unclipped square (the hit area, so it doesn't reach along the
+   pane's edges into the resize hitboxes). Its cursor stays a pointer (click first, drag
+   second). */
+.carreau-pane.has-chrome { position: relative; }
+.carreau-wedge { position: absolute; right: 0; bottom: 0; z-index: 2; width: 16px; height: 16px; cursor: pointer; }
+.carreau-wedge::before {
   content: ""; position: absolute; inset: 0;
   background: var(--focus-accent, light-dark(#8a8d96, #80838d)); clip-path: polygon(100% 0, 100% 100%, 0 100%);
 }
+/* EXPERIMENT (with CELL_WEDGE in view.ts, which also gives the wedge to cells whose bar is
+   hidden): the wedge at the bottom left (in a cell, right of its gutter). Back out: delete this
+   block, and set CELL_WEDGE to false. */
+.carreau-wedge { right: auto; left: 0; }
+.carreau-wedge::before { clip-path: polygon(0 0, 0 100%, 100% 100%); }
+/* In a cell, a smaller wedge on the gutter's bar: its right angle on the bar's left edge, over
+   the bar's lower end (above the gutter, which would otherwise take the clicks). */
+.carreau-scrollcell > .carreau-wedge { left: 7px; width: 10px; height: 10px; z-index: 3; }
+/* The gutter's bar reaches down into it (normal or bold, it meets the wedge's edge). */
+.carreau-scrollcell:has(> .carreau-wedge) > .carreau-gutter::before { bottom: 0; }
+.carreau-scrollcell > .carreau-wedge::before { background: var(--focus-accent, #8a8d96); }
+.carreau-scrollcell[data-status="error"] > .carreau-wedge::before { background: #e5484d; }
+/* (end of EXPERIMENT) */
 /* Every tab's text is faded except the selected one (active tab of the focused pane). The
    active tab of each pane has a line on the header's grey line: mid grey, or the tab's
    accent when its pane is focused. */
@@ -99,10 +112,11 @@
 .carreau-closing:hover::after { opacity: 1; }
 @keyframes carreau-spin { to { transform: rotate(360deg); } }
 .carreau-tab.closing .carreau-tab-short, .carreau-tab.closing .carreau-tab-icon { opacity: 0.55; }
-.carreau-long .carreau-closing { position: absolute; right: 6px; top: 50%; margin-top: -8px; }
 .carreau-tab.active { box-shadow: inset 0 2px 0 light-dark(#a3a6af, #6f727c); }
 /* (also the groups' holders, when the selection is inside them) */
 .carreau-pane.selected > .carreau-tabbar .carreau-tab.active, .carreau-pane.focus-path > .carreau-tabbar .carreau-tab.active { color: light-dark(#1d1e22, #eee); box-shadow: inset 0 2px 0 var(--tab-accent); }
+/* A lone tab has no other to be told apart from: no active line (a folded bar shows nothing). */
+.carreau-tabbar .carreau-tabs > .carreau-tab.active:only-child { box-shadow: none; }
 /* merged tabs (a tab complex): styled like any tab, with a link icon between them */
 .carreau-tab-link {
   flex: none; display: flex; align-items: center; padding: 0 1px; color: light-dark(#8a8d98, #7a7d87); cursor: grab;
@@ -269,7 +283,7 @@
 .carreau-float-bar:hover { background: linear-gradient(light-dark(#d8dbe2, #4a4e5a), light-dark(#c4c7cf, #2c2e37)); }
 .carreau-selection.in-float { z-index: 8; }
 /* bare windows: no chrome at all (see FloatingWindow.bare) */
-.carreau-float-bare .carreau-tabbar { display: none; }
+.carreau-float-bare .carreau-tabbar, .carreau-float-bare .carreau-wedge { display: none; }
 /* fit windows: as tall as their content (see FloatingWindow.fit) */
 .carreau-float-fit { overflow: hidden; }
 .carreau-float-fit .carreau-pane, .carreau-float-fit .carreau-body, .carreau-float-fit .carreau-content { flex: 0 1 auto; min-height: 0; }
@@ -312,7 +326,7 @@
 }
 /* maximizing something inside a group: the holder's tabs and outline go away */
 .carreau-pane.max-through { border: 0; border-radius: 0; background: transparent; }
-.carreau-pane.max-through > .carreau-tabbar { display: none; }
+.carreau-pane.max-through > .carreau-tabbar, .carreau-pane.max-through > .carreau-wedge { display: none; }
 .carreau-pane.max-through > .carreau-body { background: transparent; }
 /* a group inside a scroll split: its root sizes to its content along the scroll axis */
 .carreau-group.natural-row > * { flex: none !important; }
@@ -404,10 +418,8 @@
 }
 .carreau-cell-close::before { content: "×"; }
 .carreau-cell-close:hover { color: light-dark(#1d1e22, #eee); background: light-dark(#e3e5ea, #3a3d48); }
-/* A folded pane (not a cell: it has its × either way) shows this × at its top right — the
-   tabs' are folded away with them. While its tabs close, the closing spinner sits in its
-   place (the `.pane-close` class makes the pane the anchor for both). */
-.carreau-pane.pane-close { position: relative; }
+/* A pane whose bar isn't full (and a cell, always) shows this × at its top right; while its
+   tabs close, the closing spinner sits in its place (see View.paneChrome). */
 .carreau-pane > .carreau-closing { position: absolute; top: 5px; right: 6px; z-index: 1; }
 /* a secondary focus: what cell operations act on, when not the selection (Workspace.operand) */
 .carreau.nav-mode .carreau-pane.secondary { outline: 1px dotted light-dark(#8a8d98, #80838d); outline-offset: -2px; }

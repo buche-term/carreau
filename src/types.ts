@@ -70,6 +70,11 @@ export interface PaneNode {
    * disappearing: e.g. an empty pane made to be filled later. No name, so no zone.
    */
   keep?: boolean;
+  /**
+   * The user's say on its tab bar (its ▾, its wedge): true folds it, false keeps it full.
+   * Absent: automatic (see `barMode`). Part of the layout: it serializes, and undoes.
+   */
+  fold?: boolean;
 }
 
 export interface SplitNode {

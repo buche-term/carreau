@@ -26,6 +26,8 @@ import {
   isSticky,
   kind,
   panes,
+  BarMode,
+  barMode,
   paneDisplay,
   pathTo,
   rootCtx,
@@ -247,6 +249,15 @@ interface ScrollCell {
   axis: "row" | "column";
 }
 
+/**
+ * EXPERIMENT (to try out, easy to back out): cells whose bar is hidden ("none": see `barMode`)
+ * get the wedge too, like folded panes, as their handle and to dwell on in a drag; the wedge
+ * sits at the bottom left (see the matching EXPERIMENT block in style.css), and the bar's fold
+ * button (▾) at the bar's left end, on the same side. Back out: false here, and delete that CSS
+ * block (the wedge then goes back to folded panes' bottom right, the ▾ to the bar's right end).
+ */
+const CELL_WEDGE = true;
+
 /** Two presses on a cell's bar within this long (ms) are a double click. */
 const DOUBLE_PRESS = 400;
 /** A resized scroll-column cell's minimum height. */
@@ -268,10 +279,13 @@ export class View implements DndHost {
   private navMode: "off" | "held" = "off";
   private menu: HTMLElement | null = null;
   private menuAnchor: HTMLElement | null = null;
-  /** What the user made of each pane's bar fold (true: folded, false: open). Their say sticks;
-   *  absent (automatic), a single unnamed tab's bar folds itself — see `isBarCollapsed`. View
-   *  state, see `fillTabBar`. */
-  private barFold = new Map<string, boolean>();
+  /** Each pane's bar, as rendered last (`shown`, holds included) and as it would be without
+   *  holds (`auto`: its own mode, `barMode`). */
+  private barModes = new Map<string, { shown: BarMode; auto: BarMode }>();
+  /** Panes whose bar is held full, and by how many holders (see `ensureExpanded`). */
+  private holds = new Map<string, number>();
+  /** The holds marks keep on folded bars, for their badges (see `decorate`). */
+  private markHolds = new Map<string, () => void>();
   /** One persistent element per tab, by tab id. */
   private contents = new Persistent();
   /** Other persistent elements, for renderers (`persist`). */
@@ -535,6 +549,7 @@ export class View implements DndHost {
     for (const el of this.el.querySelectorAll<HTMLElement>(".carreau-scroll, .carreau-tabs"))
       if (el.getClientRects().length) this.rememberScroll(el);
     this.bodies.clear();
+    this.barModes.clear();
     const root = rootCtx();
     const tree = this.nodeEl(this.ws.root, root);
     syncChildren(this.rootEl, [tree]);
@@ -770,31 +785,25 @@ export class View implements DndHost {
   /** A pane: its tab bar (at the bottom) and body. It decides its display from its context. */
   private fillPane(el: HTMLElement, node: PaneNode, ctx: Ctx, cell?: ScrollCell): void {
     el.classList.add("carreau-pane");
-    const display = paneDisplay(node, ctx);
+    // (A hold keeps the bar full: see `ensureExpanded`.)
+    const pin = this.holds.has(node.id) ? false : node.fold;
+    const display = paneDisplay(node, ctx, pin);
+    const mode = display.bar;
+    this.barModes.set(node.id, { shown: mode, auto: pin === node.fold ? mode : barMode(node, ctx) });
     const activeTab = node.tabs[node.active];
     if (activeTab) el.style.setProperty("--focus-accent", cellAccent(activeTab));
     else el.style.removeProperty("--focus-accent");
-    const kids = this.decorateScrollCell(el, node, cell);
-    // A folded bar leaves only the tabs' 2px line and the wedge: no tab × within reach, so
-    // the pane shows one of its own at the top right (cells have theirs either way). While a
-    // tab closes, its spinner takes its place (the tabs' spinners are folded away too). Not
-    // when the pane shows a group: the cells inside reach that corner, their ×'s among them.
-    const folded = !cell && this.isBarCollapsed(node) && !activeGroup(node);
-    const foldedClosing = folded ? node.tabs.find((t) => this.ws.isClosing(t.id)) : undefined;
-    const foldedClose = folded && !foldedClosing && this.ws.canClosePane(node.id);
-    if (foldedClosing) kids.push(this.closingSpinner(foldedClosing.id, `fold:${node.id}`));
-    else if (foldedClose) kids.push(this.paneClose(node));
-    el.classList.toggle("pane-close", !!foldedClosing || foldedClose);
+    const kids = [...this.decorateScrollCell(el, node, cell), ...this.paneChrome(el, node, mode, !!cell)];
     const bar = this.tabBar(node);
-    bar.hidden = !display.showTabBar;
-    el.classList.toggle("no-tabbar", !display.showTabBar);
+    bar.hidden = mode === "none";
+    el.classList.toggle("no-tabbar", mode === "none");
     const body = this.parts.get(`body:${node.id}`, null, () => div("carreau-body"));
     this.bodies.set(node.id, body);
     syncChildren(el, [...kids, bar, body]);
-    this.fillTabBar(bar, node, ctx, el);
+    this.fillTabBar(bar, node, ctx, el, mode);
     const bodyKids: HTMLElement[] = [];
     // With no tab bar, a strip on top (the cell's `long`, or an empty one) is the handle.
-    if (activeTab && ((display.showLong && activeTab.long) || !display.showTabBar)) {
+    if (activeTab && ((display.showLong && activeTab.long) || mode === "none")) {
       const long = this.parts.get(`long:${node.id}`, { node, el }, (cur) => {
         const l = div("carreau-long");
         l.title = "Drag to move this pane";
@@ -818,13 +827,8 @@ export class View implements DndHost {
       const html = display.showLong ? (activeTab.long ?? "") : "";
       setHTML(long, html);
       long.classList.toggle("empty", !html);
-      // No tab bar: the closing indicator goes on the strip.
-      const closingTab = node.tabs.find((t) => this.ws.isClosing(t.id));
-      long.classList.toggle("closing", !!closingTab);
-      if (closingTab) {
-        const s = this.closingSpinner(closingTab.id, `long:${node.id}`);
-        if (long.lastChild !== s) move(long, s);
-      }
+      // (Room for the closing spinner, which the pane shows over it: see `paneChrome`.)
+      long.classList.toggle("closing", node.tabs.some((t) => this.ws.isClosing(t.id)));
       long.style.setProperty("--cell-accent", cellAccent(activeTab));
       bodyKids.push(long);
     }
@@ -860,8 +864,8 @@ export class View implements DndHost {
 
   /**
    * A pane in a cell of a scroll split (the cell itself, or in a split that is the cell): an
-   * accent bar on the left, with its status on top (like buche's echo-box), and a close button
-   * at the top right. In a scroll-column, the bar resizes the cell (all the bars of a split
+   * accent bar on the left, with its status on top (like buche's echo-box); its close button is
+   * the pane's chrome (see `paneChrome`). In a scroll-column, the bar resizes the cell (all the bars of a split
    * cell resize the same cell, so they stay in sync): dragging outward (up from its top half,
    * down from its bottom half) grows it, inward shrinks it, and the dragged edge stays put on
    * screen. Double-click: back to its natural height. Returns those elements, for the pane.
@@ -883,17 +887,61 @@ export class View implements DndHost {
     const resizes = cell.axis === "column";
     gutter.classList.toggle("resizes", resizes);
     setAttr(gutter, "title", resizes ? "Drag to resize; double-click: natural height" : null);
-    if (!this.ws.canClosePane(node.id) || node.tabs.some((t) => this.ws.isClosing(t.id))) return [gutter];
-    return [gutter, this.paneClose(node)];
+    return [gutter];
   }
 
   /**
-   * The pane's × at its top right, which closes the pane: a scroll cell always has one; so
-   * does a pane whose bar is folded, where the tabs (and their ×) are folded away.
+   * What a pane shows of its own where its bar doesn't (any mode but "full", see `barMode`),
+   * and a scroll cell always: at its top right, its × (it closes the pane), or in its place,
+   * while a tab closes, that tab's spinner (the tabs' own are out of sight); at its bottom, the
+   * wedge, its handle (see `wedge`). The corner is left alone over a group: the cells inside
+   * reach it, their ×'s among them. (A cell with its full bar: the × only, the tabs have their
+   * spinners.)
    */
-  private paneClose(node: PaneNode): HTMLElement {
-    return this.parts.get(`cell-close:${node.id}`, node.id, (cur) => {
-      return iconButton("carreau-cell-close", "Close", () => this.ws.closePane(cur()));
+  private paneChrome(el: HTMLElement, node: PaneNode, mode: BarMode, cell: boolean): HTMLElement[] {
+    const kids: HTMLElement[] = [];
+    const bare = mode !== "full";
+    const corner = cell || (bare && !activeGroup(node));
+    const closing = node.tabs.find((t) => this.ws.isClosing(t.id));
+    if (corner && closing && bare) kids.push(this.closingSpinner(closing.id, `pane:${node.id}`));
+    else if (corner && !closing && this.ws.canClosePane(node.id))
+      kids.push(
+        this.parts.get(`cell-close:${node.id}`, node.id, (cur) => {
+          return iconButton("carreau-cell-close", "Close", () => this.ws.closePane(cur()));
+        }),
+      );
+    if (mode === "folded" || (mode === "none" && CELL_WEDGE)) kids.push(this.wedge(node, el));
+    el.classList.toggle("has-chrome", kids.length > 0);
+    return kids;
+  }
+
+  /**
+   * The wedge: a triangle in a bottom corner of a pane whose bar isn't full, in the active tab's
+   * accent. A click brings the full bar back (pinned: see `PaneNode.fold`), a drag moves the
+   * pane, and a drag resting on it unfolds the bar for a drop into it (see the dnd's
+   * `wedgeAt`).
+   */
+  private wedge(node: PaneNode, el: HTMLElement): HTMLElement {
+    return this.parts.get(`wedge:${node.id}`, { node, el }, (cur) => {
+      const w = div("carreau-wedge");
+      w.title = "Click to expand the tab bar, drag to move this pane";
+      let x0 = 0;
+      let y0 = 0;
+      let moved = false;
+      w.addEventListener("pointerdown", (e) => {
+        x0 = e.clientX;
+        y0 = e.clientY;
+        moved = false;
+        this.dragPane(e, cur().node, cur().el);
+      });
+      // arm captured the pointer on the wedge: its moves come here even once it's elsewhere
+      // (the same 5px as dnd, so this sees exactly when a press becomes a drag).
+      w.addEventListener("pointermove", (e) => {
+        if (e.buttons && Math.hypot(e.clientX - x0, e.clientY - y0) > 5) moved = true;
+      });
+      // (The click a pane drag ends with must not open the bar.)
+      w.addEventListener("click", () => moved || this.ws.foldPane(cur().node.id, false));
+      return w;
     });
   }
 
@@ -956,7 +1004,7 @@ export class View implements DndHost {
     return this.parts.get(`bar:${node.id}`, null, () => div("carreau-tabbar"));
   }
 
-  private fillTabBar(bar: HTMLElement, node: PaneNode, ctx: Ctx, paneEl: HTMLElement): void {
+  private fillTabBar(bar: HTMLElement, node: PaneNode, ctx: Ctx, paneEl: HTMLElement, mode: BarMode): void {
     const data = { node, ctx, paneEl };
     // Tabs never shrink: they scroll horizontally (scrollbar hidden), with shadows.
     const wrap = this.parts.get(`tabs:${node.id}`, null, () => {
@@ -979,42 +1027,22 @@ export class View implements DndHost {
     });
     const scroller = wrap.firstElementChild as HTMLElement;
     const kids: HTMLElement[] = [];
-    // The fold button, at the bar's right end, next to the ⋯: ▾ collapses the bar to its 2px —
-    // what's left is the tabs' top line, the active tab's highlight marking the pane's bottom
-    // edge. Collapsed, the button becomes a right triangle over the pane's bottom-right corner
-    // (in the active tab's accent): a click brings the bar back, a drag moves the pane (the
-    // bar's other handles are gone then). The tabs stay in the bar either way: the shortcuts
-    // keep working. A single unnamed tab starts folded (a tab joining, or a name, unfolds it)
-    // — a click pins the fold either way, and the pin sticks (see `isBarCollapsed`). A group
-    // that was just made is the exception: `groupAndName` opens its bar, its name is the point.
-    const collapsed = this.isBarCollapsed(node);
-    const fold = this.parts.get(`fold:${node.id}`, data, (cur) => {
-      const fold = div("carreau-tabbar-fold");
-      let x0 = 0;
-      let y0 = 0;
-      let moved = false;
-      fold.addEventListener("pointerdown", (e) => {
-        const { node, paneEl } = cur();
-        x0 = e.clientX;
-        y0 = e.clientY;
-        moved = false;
-        if (this.isBarCollapsed(node))
-          this.dragPane(e, node, paneEl);
-        else e.stopPropagation();
-      });
-      // arm captured the pointer on the wedge: its moves come here even once it's elsewhere
-      // (the same 5px as dnd, so this sees exactly when a press becomes a drag).
-      fold.addEventListener("pointermove", (e) => {
-        if (e.buttons && Math.hypot(e.clientX - x0, e.clientY - y0) > 5) moved = true;
-      });
-      fold.addEventListener("click", () => {
-        if (moved) return; // the click a pane drag ends with must not reopen the bar
-        this.collapseTabBar(cur().node.id);
-      });
-      return fold;
-    });
-    fold.textContent = collapsed ? "" : "▾";
-    setAttr(fold, "title", collapsed ? "Click to expand the tab bar, drag to move this pane" : "Collapse the tab bar");
+    // The fold button (▾), at the bar's left end (on the wedge's side; with the experiment off, at
+    // its right end, next to the ⋯), folds the bar (pinned: see
+    // `PaneNode.fold`): what's left is the tabs' top line, the active tab's highlight marking
+    // the pane's bottom edge, and the pane's wedge (see `paneChrome`), which brings it back.
+    // The tabs stay in the bar either way: the shortcuts keep working. Unpinned, the bar
+    // follows the automatic rule (see `barMode`).
+    const collapsed = mode !== "full";
+    const fold = collapsed
+      ? null
+      : this.parts.get(`fold:${node.id}`, data, (cur) => {
+          const fold = Object.assign(div("carreau-tabbar-fold"), { textContent: "▾", title: "Collapse the tab bar" });
+          fold.addEventListener("pointerdown", (e) => e.stopPropagation());
+          fold.addEventListener("click", () => this.ws.foldPane(cur().node.id, true));
+          return fold;
+        });
+    if (fold && CELL_WEDGE) kids.push(fold);
     // Its name, if it has one: left of the tabs (double-click: edit it). It's a handle, like the
     // header's empty part.
     if (node.name && !collapsed) {
@@ -1043,7 +1071,7 @@ export class View implements DndHost {
         }),
       );
     if (!ctx.floating && !collapsed)
-      // "More" button, at the bar's right end (left of the fold button): opens the pane menu.
+      // "More" button, at the bar's right end: opens the pane menu.
       kids.push(
         this.parts.get(`more:${node.id}`, data, (cur) => {
           const more = Object.assign(div("carreau-more"), { title: "Pane options", textContent: "⋯" });
@@ -1060,9 +1088,8 @@ export class View implements DndHost {
           return more;
         }),
       );
-    // The fold button, last: the bar's right end, next to the ⋯ (collapsed, the wedge takes
-    // that very corner).
-    kids.push(fold);
+    // (Experiment off: the fold button last, the bar's right end, next to the ⋯.)
+    if (fold && !CELL_WEDGE) kids.push(fold);
     syncChildren(bar, kids);
     bar.classList.toggle("collapsed", collapsed);
     const tabs: HTMLElement[] = [];
@@ -1085,33 +1112,32 @@ export class View implements DndHost {
     syncChildren(scroller, tabs);
   }
 
-  /** Whether a pane's bar is folded. A click on the fold pins it (see `collapseTabBar`), and
-   *  the pin sticks; unpinned, the fold is automatic: a single unnamed tab leaves nothing to
-   *  choose from, so the bar stays folded until a tab joins it or the pane gets a name. */
-  private isBarCollapsed(node: PaneNode): boolean {
-    return this.barFold.get(node.id) ?? (node.tabs.length === 1 && !node.name);
-  }
-
-  /** Collapse a pane's tab bar, or bring it back (its ▾, its corner wedge): what the user
-   *  clicks is theirs for good, pinned over the automatic fold either way. While collapsed,
-   *  the bar keeps its 2px: the tabs' top line — the active tab's highlight, on the pane's
-   *  bottom edge — and the wedge in its bottom-right corner, which drags the pane and, on a
-   *  click, brings the bar back; the tabs are still there, so the tab shortcuts keep
-   *  working. */
+  /** Fold a pane's tab bar, or bring it back (what its ▾ and its wedge do): pinned, an undo
+   *  step (see `Workspace.foldPane`). */
   collapseTabBar(paneId: string): void {
-    const node = this.ws.node(paneId);
-    const folded = node?.type === "pane" ? this.isBarCollapsed(node) : (this.barFold.get(paneId) ?? false);
-    this.barFold.set(paneId, !folded);
-    this.render();
+    const shown = this.barModes.get(paneId)?.shown;
+    if (shown) this.ws.foldPane(paneId, shown === "full");
   }
 
-  /** Unfold a pane's tab bar if it's folded (a drag resting on its wedge: see the dnd; a new
-   *  group's bar: see `groupAndName`), pinned open like a click on the wedge. */
-  expandTabBar(paneId: string): void {
-    const node = this.ws.node(paneId);
-    if (node?.type !== "pane" || !this.isBarCollapsed(node)) return;
-    this.barFold.set(paneId, false);
-    this.render();
+  /**
+   * Show a pane's full tab bar (unfold a folded one, show a cell's hidden one) for whatever
+   * needs it (a title being edited, a drop into it, a mark's badge…), until the returned
+   * function is called: renders meanwhile keep it full (the automatic rule would fold it
+   * back). Holds nest: the bar goes back to its own mode when the last one is released. The
+   * bar is there when it returns (it renders, if it has to).
+   */
+  ensureExpanded(paneId: string): () => void {
+    this.holds.set(paneId, (this.holds.get(paneId) ?? 0) + 1);
+    if (this.barModes.get(paneId)?.shown !== "full") this.render();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const n = (this.holds.get(paneId) ?? 1) - 1;
+      if (n > 0) return void this.holds.set(paneId, n);
+      this.holds.delete(paneId);
+      if (this.barModes.get(paneId)?.auto !== "full") this.render();
+    };
   }
 
   /** A tab: [icon][short][×]. The status changes how the icon looks (see the CSS). */
@@ -1272,19 +1298,31 @@ export class View implements DndHost {
     const tree = this.ws.treeOf(sel.id);
     for (const n of (tree && pathTo(tree, sel.id)?.slice(0, -1)) ?? []) if (n.type === "pane") this.elOf(n.id)?.classList.add("focus-path");
     // Marks (stored selections): numbered, in the order marked, on the tab (or the pane's tab
-    // bar); where the tab bar is hidden, on the cell's long strip.
+    // bar); where the tab bar is hidden ("none"), on the cell's long strip. A folded bar is
+    // held open while it has a mark, for the badge to show (see `ensureExpanded`).
     for (const el of this.el.querySelectorAll("[data-mark]")) el.removeAttribute("data-mark");
+    const held = new Set<string>();
     this.ws.validMarks().forEach((id, i) => {
       const mark = String(i + 1);
       const tabEl = this.el.querySelector<HTMLElement>(`.carreau-tab[data-tab="${id}"]`);
       const paneEl = tabEl ? tabEl.closest<HTMLElement>(".carreau-pane") : this.elOf(id);
-      if (tabEl && !tabEl.closest<HTMLElement>(".carreau-tabbar")!.hidden) tabEl.dataset.mark = mark;
-      else if (!tabEl && paneEl?.querySelector<HTMLElement>(":scope > .carreau-tabbar:not([hidden])")) paneEl.querySelector<HTMLElement>(":scope > .carreau-tabbar")!.dataset.mark = mark;
+      const modes = paneEl?.classList.contains("carreau-pane") ? this.barModes.get(paneEl.dataset.id!) : undefined;
+      if (modes?.auto === "folded") held.add(paneEl!.dataset.id!);
+      if (modes && modes.shown !== "none") (tabEl ?? paneEl!.querySelector<HTMLElement>(":scope > .carreau-tabbar")!).dataset.mark = mark;
       else {
         const strip = paneEl?.querySelector<HTMLElement>(":scope > .carreau-body > .carreau-long");
         if (strip) strip.dataset.mark = mark;
       }
     });
+    // (The map first: a render within decorates again.)
+    const add = [...held].filter((id) => !this.markHolds.has(id));
+    const drop = [...this.markHolds].filter(([id]) => !held.has(id));
+    for (const id of add) this.markHolds.set(id, () => {});
+    for (const [id, release] of drop) {
+      this.markHolds.delete(id);
+      release();
+    }
+    for (const id of add) this.markHolds.set(id, this.ensureExpanded(id));
     // What cell operations act on, if not the selection (see `Workspace.operand`): shown in
     // navigation mode, as a secondary focus.
     const op = this.ws.operand();
@@ -1471,10 +1509,7 @@ export class View implements DndHost {
     if (!this.ws.group(randomName(), selection)) return;
     const holder = this.ws.node(this.ws.selection.id);
     if (holder?.type !== "pane") return;
-    // A group you asked for shows its name: its bar starts open, pinned (its single tab being
-    // unnamed would otherwise fold it to 2px, where the name being typed can't be read). The
-    // holders normalization wraps around scroll splits keep the automatic fold.
-    this.expandTabBar(holder.id);
+    // (Its bar is full: a lone group tab keeps it, see `barMode`; and editing holds it open.)
     // Naming is part of grouping: Escape, or an empty name, cancels the grouping itself.
     this.editTabTitle(holder.tabs[holder.active].id, () => this.ws.discardLastStep());
   }
@@ -1486,9 +1521,11 @@ export class View implements DndHost {
    */
   editPaneName(paneId: string): void {
     const p = this.ws.node(paneId);
+    if (p?.type !== "pane" || !this.elOf(paneId)) return;
+    // (A folded bar, a cell's hidden one: full while naming.)
+    const release = this.ensureExpanded(paneId);
     const bar = this.elOf(paneId)?.querySelector<HTMLElement>(":scope > .carreau-tabbar");
-    if (p?.type !== "pane" || !bar) return;
-    bar.hidden = false; // (a cell's hidden tab bar: shown while naming)
+    if (!bar) return release();
     const valid = () => !input.value.trim() || this.ws.canNamePane(paneId, input.value);
     const input = inPlaceInput("carreau-pane-name-edit", p.name ?? "", 6, {
       placeholder: "Name",
@@ -1497,6 +1534,7 @@ export class View implements DndHost {
       finish: (commit) => {
         if (commit && !valid()) return false;
         if (!commit || !this.ws.namePane(paneId, input.value)) this.ws.emit(); // re-render: back to how it was
+        release();
       },
       blurCommits: valid,
     });
@@ -1512,9 +1550,14 @@ export class View implements DndHost {
    * current title. With `onCancel`, Escape or an empty name call it instead.
    */
   editTabTitle(tabId: string, onCancel?: () => void): void {
-    const tab = this.el.querySelector<HTMLElement>(`.carreau-tab[data-tab="${tabId}"]`);
+    const tabEl = () => this.el.querySelector<HTMLElement>(`.carreau-tab[data-tab="${tabId}"]`);
+    const paneId = tabEl()?.closest<HTMLElement>(".carreau-pane")?.dataset.id;
+    if (!paneId) return;
+    // (A folded bar, a cell's hidden one: full while editing.)
+    const release = this.ensureExpanded(paneId);
+    const tab = tabEl();
     const text = tab?.querySelector<HTMLElement>(".carreau-tab-short");
-    if (!tab || !text || !tab.getClientRects().length) return; // hidden tab bar: nothing to edit
+    if (!tab || !text || !tab.getClientRects().length) return release(); // (not shown: an inactive group's)
     const before = text.textContent ?? "";
     const input = inPlaceInput("carreau-tab-edit", before, 4, {
       finish: (commit) => {
@@ -1522,6 +1565,7 @@ export class View implements DndHost {
         if (onCancel && (!commit || !title)) onCancel();
         else if (commit && title && title !== before) this.ws.renameTab(tabId, title);
         else this.ws.emit(); // re-render: back to the plain title
+        release();
       },
     });
     tab.replaceChild(input, text);

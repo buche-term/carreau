@@ -52,8 +52,9 @@ export interface DndHost {
   visRect(id: string): Rect | null;
   /** where a pane floated out of the layout appears */
   floatRect(paneId: string): Rect | null;
-  /** Unfold a pane's collapsed tab bar (a drag resting on its corner wedge, to drop into it). */
-  expandTabBar(paneId: string): void;
+  /** Show a pane's full tab bar until the returned function is called (a drag resting on its
+   *  wedge, to drop into it: until the drag ends). */
+  ensureExpanded(paneId: string): () => void;
 }
 
 /** One possible drop. */
@@ -152,7 +153,7 @@ const LINE_HIT = 8;
 const MINI_DELAY = 250;
 /** How long the cursor rests on a tab, still, during a drag before the tab gets the focus. */
 const TAB_FOCUS_DELAY = 250;
-/** How long a drag rests on a collapsed tab bar's corner wedge before the bar unfolds. */
+/** How long a drag rests on a pane's wedge (its bar folded, or hidden) before the bar unfolds. */
 const UNFOLD_DELAY = 200;
 const MINI_LEN = 44;
 const MINI_T = 6;
@@ -181,9 +182,11 @@ export class DragDrop {
   private miniTimer: ReturnType<typeof setTimeout> | null = null;
   /** The wait before a tab the cursor rests on (during a drag) gets the focus; null: none. */
   private dwellTimer: ReturnType<typeof setTimeout> | null = null;
-  /** The collapsed bar's pane whose wedge the drag rests on, and the wait before it unfolds. */
+  /** The pane whose wedge the drag rests on, and the wait before its bar unfolds. */
   private unfoldPane: string | null = null;
   private unfoldTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The bars this drag unfolded: held full until it ends (see `ensureExpanded`). */
+  private unfolded: (() => void)[] = [];
   /** The layout's index, during a drag (it doesn't change meanwhile). */
   private index: LayoutIndex | null = null;
   /** No drag may start before this time. */
@@ -288,6 +291,8 @@ export class DragDrop {
       const t = d.active.target;
       this.ws.commitDrop(d.active.result, d.win, t.kind === "float" ? (this.host.floatRect(t.paneId) ?? undefined) : undefined);
     }
+    // (After the drop: a bar it went into stays full by itself.)
+    for (const release of this.unfolded.splice(0)) release();
   }
 
   private tryDrop(target: DropTarget): ForestResult | null {
@@ -324,7 +329,7 @@ export class DragDrop {
     const px = ev.clientX - base.left;
     const py = ev.clientY - base.top;
 
-    // On a collapsed bar's corner wedge: nothing but the wedge, over every other drop (lines,
+    // On a pane's wedge (its bar folded, or hidden): nothing but the wedge, over every other drop (lines,
     // mini lines, zones…) — resting there unfolds the bar (see `waitToUnfold`), whose tab gaps
     // are then drops.
     const wedge = this.wedgeAt(ev);
@@ -428,13 +433,13 @@ export class DragDrop {
     this.draw();
   }
 
-  /** The pane whose collapsed bar's corner wedge is under the cursor (not the dragged pane's:
-   *  dragging a pane by its wedge starts there). Null: none. */
+  /** The pane whose wedge is under the cursor (not the dragged pane's: dragging a pane by its
+   *  wedge starts there). Null: none. */
   private wedgeAt(ev: PointerEvent): string | null {
     for (const el of document.elementsFromPoint(ev.clientX, ev.clientY)) {
-      const fold = (el as HTMLElement).closest?.(".carreau-tabbar.collapsed > .carreau-tabbar-fold") as HTMLElement | null;
-      if (!fold) continue;
-      const paneEl = fold.parentElement!.parentElement;
+      const wedge = (el as HTMLElement).closest?.(".carreau-pane > .carreau-wedge") as HTMLElement | null;
+      if (!wedge) continue;
+      const paneEl = wedge.parentElement;
       const id = paneEl?.classList.contains("carreau-pane") ? paneEl.dataset.id : undefined;
       const s = this.state!.subject;
       return id && !(s.kind === "pane" && s.paneId === id) ? id : null;
@@ -443,8 +448,8 @@ export class DragDrop {
   }
 
   /**
-   * Wedge dwell: the cursor resting on a collapsed bar's corner wedge during a drag unfolds
-   * the bar, so the drag can then go into it. Moving within the same wedge keeps the wait
+   * Wedge dwell: the cursor resting on a pane's wedge during a drag unfolds its bar (until
+   * the drag ends), so the drag can then go into it. Moving within the same wedge keeps the wait
    * going; leaving it cancels.
    */
   private waitToUnfold(paneId: string | null): void {
@@ -459,7 +464,7 @@ export class DragDrop {
     this.unfoldTimer = null;
     this.unfoldPane = null;
     if (!this.state) return;
-    this.host.expandTabBar(paneId);
+    this.unfolded.push(this.host.ensureExpanded(paneId));
     // The bar is there now: its tab gaps are drops (a fresh look at what's under the cursor).
     this.refresh();
   }

@@ -342,15 +342,42 @@ export function mergeKey(t: Tab): string | null {
 }
 
 /**
- * How a pane displays its tabs, decided by the pane from the context its parent gave it.
- * Panes in scroll splits are "cells": a single tab hides the tab bar (a group tab always
- * shows: it's a container whose name matters), and the active cell's `long` shows on top.
+ * How a pane shows its tab bar: "full"; "folded" (2px: the tabs' top line, and a wedge as its
+ * handle); "none" (no bar at all: a scroll cell, whose `long` strip is on top).
+ * `pin`: the user's say (`PaneNode.fold`, or a caller holding the bar open: see
+ * `View.ensureExpanded`): true takes the bar out of sight as the rule below would (hidden in
+ * a scroll cell, folded elsewhere), false shows the full bar. Unpinned, the rule is one: a
+ * lone unnamed tab has nothing to choose from, so its bar goes ("none" in a scroll cell,
+ * "folded" elsewhere) until a tab joins it or the pane gets a name. A lone group tab keeps its
+ * bar (it's a container whose name matters), unless it only holds a scroll split (the holder
+ * normalization wraps around one: see `normalize`), which counts as a lone tab.
  */
-export function paneDisplay(p: PaneNode, ctx: Ctx): { cell: boolean; showTabBar: boolean; showLong: boolean } {
-  const cell = ctx.natural.row || ctx.natural.column;
-  // (A named pane shows it: its name is there.)
-  const showTabBar = !cell || p.tabs.length !== 1 || !!p.tabs[0].group || !!p.name;
-  return { cell, showTabBar, showLong: cell };
+export type BarMode = "full" | "folded" | "none";
+
+export function barMode(p: PaneNode, ctx: Ctx, pin: boolean | undefined = p.fold): BarMode {
+  // Out of sight: hidden in a scroll cell (its long strip is the handle), folded elsewhere.
+  const away = isCellCtx(ctx) ? "none" : "folded";
+  if (pin !== undefined) return pin ? away : "full";
+  const lone = p.tabs[0];
+  if (p.tabs.length !== 1 || p.name) return "full";
+  const root = lone.group?.children[0];
+  if (root && !isScroll(root)) return "full";
+  return away;
+}
+
+/** Whether a context is a scroll split's cell's (see `paneDisplay`). */
+function isCellCtx(ctx: Ctx): boolean {
+  return ctx.natural.row || ctx.natural.column;
+}
+
+/**
+ * How a pane displays its tabs, decided by the pane from the context its parent gave it.
+ * Panes in scroll splits are "cells": the active cell's `long` shows on top. Its bar: see
+ * `barMode` (`pin`: as there).
+ */
+export function paneDisplay(p: PaneNode, ctx: Ctx, pin: boolean | undefined = p.fold): { cell: boolean; bar: BarMode; showLong: boolean } {
+  const cell = isCellCtx(ctx);
+  return { cell, bar: barMode(p, ctx, pin), showLong: cell };
 }
 
 /** A pane whose only tab is a group can collapse into the group's layout (not a scroll split:

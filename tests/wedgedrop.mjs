@@ -19,7 +19,7 @@ const load = (pa = "pa") =>
 await load();
 await page.waitForTimeout(200);
 const folded = (id) => page.evaluate((id) => document.querySelector(`[data-id="${id}"] > .carreau-tabbar`).classList.contains("collapsed"), id);
-const wedge = async (id) => (await page.locator(`[data-id="${id}"] > .carreau-tabbar > .carreau-tabbar-fold`).boundingBox());
+const wedge = async (id) => (await page.locator(`[data-id="${id}"] > .carreau-wedge`).boundingBox());
 console.log("pa folded at first:", await folded("pa"));
 let w = await wedge("pa");
 const c = await page.locator(".carreau-tab[data-tab=tC]").boundingBox();

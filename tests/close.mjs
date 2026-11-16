@@ -22,7 +22,7 @@ console.log("middle Problems:", await layout());
 // float Terminal, then close its only tab => window closes
 const term = page.locator(".carreau-pane", { has: page.locator(".carreau-tab", { hasText: /^Terminal$/ }) });
 // Its bar folded with the lone tab (the ⋯ folds with it): click the wedge to bring it back.
-await term.locator(".carreau-tabbar-fold").click(); await settle();
+await term.locator(":scope > .carreau-wedge").click(); await settle();
 await term.locator(".carreau-more").click();
 await page.locator(".carreau-menu > button", { hasText: /^Float$/ }).click();
 console.log("floated:        ", await layout());
