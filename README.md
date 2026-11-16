@@ -20,7 +20,7 @@ layout, the geometry and the interactions.
 Carreau is versioned by **git tags** and used as a git dependency (no registry):
 
 ```sh
-bun add "carreau@github:breuleux/carreau#v0.1.0"    # or npm i github:breuleux/carreau#v0.1.0
+bun add "carreau@github:buche-term/carreau#v0.1.0"    # or npm i github:buche-term/carreau#v0.1.0
 ```
 
 A tag carries **sources only**: your bundler compiles them through the package's
@@ -106,7 +106,7 @@ node scripts/release.mjs 0.1.1   # bumps package.json, builds, runs the tests, c
 git push --follow-tags
 ```
 
-Consumers then move to `github:breuleux/carreau#v0.1.1` when they choose to.
+Consumers then move to `github:buche-term/carreau#v0.1.1` when they choose to.
 
 ### Using it from a sibling checkout (co-development)
 

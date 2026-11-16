@@ -1,6 +1,6 @@
 // Release a version: bump package.json, check (build + tests), commit, tag.
 // Publish with `git push --follow-tags` when it looks right.
-// Consumers pin the tag: "carreau": "github:breuleux/carreau#v0.1.0".
+// Consumers pin the tag: "carreau": "github:buche-term/carreau#v0.1.0".
 //
 // The tag carries source only: hosts (e.g. buche) compile it through the package's
 // "source" export condition — nothing to build at install time, nothing generated in

@@ -17,11 +17,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/breuleux/carreau.git"
+    "url": "git+https://github.com/buche-term/carreau.git"
   },
-  "homepage": "https://github.com/breuleux/carreau#readme",
+  "homepage": "https://github.com/buche-term/carreau#readme",
   "bugs": {
-    "url": "https://github.com/breuleux/carreau/issues"
+    "url": "https://github.com/buche-term/carreau/issues"
   },
   "files": [
     "src",
