@@ -48,17 +48,15 @@ const view = new View(ws, document.querySelector("#host")!, {
   },
 });
 
-// Key bindings are yours to choose:
-const nav = new KeyboardNav(ws, view, {
-  activation: { modifier: "Alt", code: "KeyQ" }, // navigation mode: Alt+Q
-  bindings: {
-    ArrowLeft: "focusLeft",
-    ArrowRight: "focusRight",
-    "Shift+ArrowLeft": "expandLeft",
-    "Shift+ArrowRight": "expandRight",
-    KeyW: "closeTab",
-  },
+// Carreau binds no keys: listen for them yourself, and drive the navigation mode and the
+// actions (the demo's handler, demo/keys.ts, is one way: an activation chord, bindings, prefixes).
+const nav = new KeyboardNav(ws, view);
+window.addEventListener("keydown", (e) => {
+  if (e.altKey && e.code === "KeyQ") nav.setMode("held"); // navigation mode: Alt+Q
+  else if (nav.mode === "held" && e.code === "ArrowLeft") nav.run({ id: "focus", args: { target: "left" } });
+  else if (nav.mode === "held" && e.code === "KeyW") nav.run("closeTab");
 });
+window.addEventListener("keyup", (e) => e.key === "Alt" && nav.setMode("off"));
 ```
 
 Persist the layout any time with `serialize(ws)` (JSON-plain), restore it with
@@ -85,9 +83,8 @@ configurePrompts(ws, { submit: (text) => ({ id: genId("t"), title: text, content
 - `registerOperand(...)` — operands for host commands (e.g. prompt-driven cell operations).
 - `ws.lifecycle` — what happens when tabs close, when a cell spawns from another cell, etc.
 - `ws.placer(...)` / `Cell` / `Placer` — place things relative to the focused cell.
-- `bridgeFrameKeys(iframe)` — let keyboard navigation work across same-origin iframes.
 - `carreauActions` (also `carreau/actions`, without the view) — the layout actions keys and menus run: each one's title, description, categories, parameters, `run` and `enabled`. Old names (`insertLeft`, `focusUp`…) are aliases.
-- `ActionRef` — an action by id and arguments (`{ id: "insert", args: { target: "left" } }`): bind one to a key in `NavConfig`, or put one in a menu. `refKey` compares resolved ones.
+- `ActionRef` — an action by id and arguments (`{ id: "insert", args: { target: "left" } }`): bind one to a key (run it with `nav.run`), or put one in a menu. `refKey` compares resolved ones.
 - `PANE_MENU`, `TAB_MENU` — the context menus, as data (lists of actions, rows, submenus: see `src/menus.ts`). View options: `menus` (your own), `actions` (your registry, if it wraps carreau's), `shortcutFor` (the shortcut an item shows). An action's `visible` and `label` decide, from the menu's pane or tab, whether it shows and how it reads.
 
 > Without `Element.moveBefore` (older browsers), everything still works — iframes simply

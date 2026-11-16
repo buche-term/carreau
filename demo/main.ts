@@ -11,7 +11,7 @@ import { deserialize, genId, serialize } from "../src/model";
 import { hasMoveBefore, View } from "../src/view";
 import { Workspace } from "../src/workspace";
 import { carreauActions, refKey } from "../src/actions";
-import { bridgeFrameKeys, KeyboardNav, NavBinding, NavConfig, NavContext } from "../src/keyboard";
+import { bridgeFrameKeys, DemoNav, NavBinding, NavConfig, NavContext } from "./keys";
 // Prompt columns (an optional module): their rendering, and their configuration below.
 import "../src/prompt-view";
 import { configurePrompts } from "../src/prompt";
@@ -221,7 +221,7 @@ const view = new View(ws, document.querySelector("#host")!, {
   },
 });
 
-const nav = new KeyboardNav(ws, view, navConfig);
+const nav = new DemoNav(ws, view, navConfig);
 
 // Help & serialization panel
 const help = document.querySelector("#keys")!;
