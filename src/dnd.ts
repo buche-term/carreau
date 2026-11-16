@@ -22,7 +22,7 @@ import {
   edge,
   linkedRuns,
   opposite,
-  findTab,
+  draggedTabs,
   inRect,
   intersect,
   isSplit,
@@ -489,7 +489,7 @@ export class DragDrop {
     this.dwellTimer = null;
     const d = this.state;
     if (!d) return;
-    const ft = this.ws.trees().map((t) => findTab(t, tabId)).find(Boolean);
+    const ft = this.ws.findTab(tabId);
     if (!ft || ft.pane.active === ft.index) return;
     this.ws.activateTab(ft.pane.id, ft.index);
     // (Its rendering: the bar's dots sit between tabs, and tabs change widths.)
@@ -658,14 +658,7 @@ export class DragDrop {
 
   /** The dragged tabs, and their pane: a tab, or a complex's tabs. */
   private draggedTabs(): { pane: PaneNode; tabs: Tab[] } | null {
-    const s = this.state!.subject;
-    if (s.kind === "tab") {
-      const ft = this.ws.trees().map((t) => findTab(t, s.tabId)).find(Boolean);
-      return ft ? { pane: ft.pane, tabs: [ft.pane.tabs[ft.index]] } : null;
-    }
-    if (s.kind !== "complex") return null;
-    for (const p of this.ws.trees().flatMap((t) => panes(t))) for (const run of linkedRuns(p)) if (run.id === s.link) return { pane: p, tabs: run.tabs };
-    return null;
+    return draggedTabs(this.ws.trees(), this.state!.subject);
   }
 
   /** The pane's own zones: edge thirds (insert beside it), and center icons. */
@@ -879,11 +872,11 @@ export class DragDrop {
       else if (t.kind === "swap") {
         // Both panes that trade contents.
         const s = d.subject;
-        const src = s.kind === "pane" ? s.paneId : s.kind === "tab" ? this.ws.trees().map((tr) => findTab(tr, s.tabId)).find(Boolean)?.pane.id : undefined;
+        const src = s.kind === "pane" ? s.paneId : s.kind === "tab" ? this.ws.findTab(s.tabId)?.pane.id : undefined;
         for (const id of [t.paneId, src]) if (id) outline(host.visRect(id));
       } else if (t.kind === "merge") {
         // The pane the merged tab joins.
-        const ft = this.ws.trees().map((tr) => findTab(tr, t.tabId)).find(Boolean);
+        const ft = this.ws.findTab(t.tabId);
         if (ft) outline(host.visRect(ft.pane.id));
       } else if (t.kind === "tab") {
         // Into a tab bar: the highlighted dot is the preview; into the center tab icon: outline the pane.

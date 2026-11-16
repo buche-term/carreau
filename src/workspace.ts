@@ -3,6 +3,9 @@
 
 import { Cell, Placer } from "./cells";
 import {
+  Compass,
+  pane as paneOf,
+  DIRECTION_SIDE,
   afterActive,
   DragSubject,
   DropTarget,
@@ -86,6 +89,10 @@ export type Command =
   | "restore";
 
 const EPS = 1e-6;
+
+/** How well a cell faces a point, spatially: its overlap, and much more if it spans `center`. */
+const facing = (overlap: number, lo: number, hi: number, center: number): number =>
+  overlap + (lo <= center && center < hi ? 10 : 0);
 /** Resizing the focus (`resizeFocus`): a share step (of the split), a cell's height step (px). */
 const SHARE_STEP = 0.05;
 const CELL_STEP = 24;
@@ -149,7 +156,6 @@ export interface PlaceSpec {
 /** What can be placed: a tab or a pane, new or already in the layout (then it moves), or a new layout. */
 export type Placeable = Tab | LayoutNode | { id: string };
 
-const DIRECTION_SIDES: Record<string, Side> = { left: "left", right: "right", up: "top", down: "bottom" };
 
 /** What cell operations act on when a node of some type is selected (see `Workspace.operand`). */
 export type OperandOf = (ws: Workspace, node: LayoutNode) => Selection | null;
@@ -602,7 +608,7 @@ export class Workspace {
       return n ? { id: n.id, last: n.id } : { id: null, last: fromId };
     }
     const sel = { id: fromId };
-    const side = DIRECTION_SIDES[path];
+    const side = DIRECTION_SIDE[path as Compass];
     const to = side
       ? this.neighbour(side, "nodes", sel)?.id
       : path === "parent"
@@ -702,7 +708,7 @@ export class Workspace {
       if (spec.split === "tab") target = this.absorbTarget(r.id);
       else target = { kind: "side", targetId: r.id, side: spec.split };
     } else if (spec.force) {
-      const side = (r.failed && DIRECTION_SIDES[r.failed]) ?? (spec.split !== "tab" ? spec.split : null);
+      const side = (r.failed && DIRECTION_SIDE[r.failed as Compass]) ?? (spec.split !== "tab" ? spec.split : null);
       if (side) {
         const idx = this.index();
         let a: LayoutNode | null = idx.parent(r.last);
@@ -834,7 +840,7 @@ export class Workspace {
     const src = this.findTab(id)?.pane ?? this.node(id);
     if (src?.type !== "pane") return null;
     // A side: into the neighbour's tabs (its most recently focused pane's), as moveInto does.
-    if (to in DIRECTION_SIDES) return this.placeDrop({ split: "tab", base: [{ id: src.id }, to as Direction], force: true }, { id });
+    if (to in DIRECTION_SIDE) return this.placeDrop({ split: "tab", base: [{ id: src.id }, to as Direction], force: true }, { id });
     // A name: into that pane's own tabs (even if it shows a group).
     const dest = this.paneByName(to);
     const subject = dest && dest.id !== src.id ? this.subjectOf({ id }) : null;
@@ -862,7 +868,7 @@ export class Workspace {
     return this.withOperand(() => {
       const tab = this.spawnTab();
       if (!tab) return null;
-      const pane: PaneNode = { type: "pane", id: genId("p"), weight: 1, tabs: [tab], active: 0 };
+      const pane = paneOf([tab]);
       this.noteOpener(tab.id);
       this.record(() => this.setTrees([...this.trees(), pane], [...this.floating, { root: pane, rect }], pane.id));
       return this.cell(pane.id);
@@ -957,7 +963,7 @@ export class Workspace {
     if (this.findTab(what.id)) return { kind: "tab", tabId: what.id };
     const n = this.node(what.id);
     if (n) return n.type === "pane" ? { kind: "pane", paneId: n.id } : null;
-    if ("title" in what) return { kind: "external", node: { type: "pane", id: genId("p"), weight: 1, tabs: [what as Tab], active: 0 } };
+    if ("title" in what) return { kind: "external", node: paneOf([what as Tab]) };
     return null;
   }
 
@@ -1176,7 +1182,8 @@ export class Workspace {
     return this.undoableClose ? this.change(fn, select) : this.hostChange(fn, select, replay);
   }
 
-  private findTab(tabId: string) {
+  /** A tab, wherever it is (the main tree, or a floating window), and its pane. */
+  findTab(tabId: string): { pane: PaneNode; index: number } | null {
     return this.trees().map((t) => findTab(t, tabId)).find(Boolean) ?? null;
   }
 
@@ -1584,9 +1591,8 @@ export class Workspace {
     if (cmd === "undo") return this.undo();
     if (cmd === "redo") return this.redo();
     {
-      const sides: Record<string, Side> = { Left: "left", Right: "right", Up: "top", Down: "bottom" };
       const m = /^(focus|expand|swap)(Left|Right|Up|Down)$/.exec(cmd);
-      if (m) return this[m[1] as "focus" | "expand" | "swap"](sides[m[2]]);
+      if (m) return this[m[1] as "focus" | "expand" | "swap"](DIRECTION_SIDE[m[2].toLowerCase() as Compass]);
       switch (cmd) {
         case "nextTab":
           return this.cycleTab(1);
@@ -1639,28 +1645,35 @@ export class Workspace {
     return isSplit(n) && s.range ? pick(n, s.range) : idx.navChild(n, (split) => pick(split));
   }
 
+  /**
+   * A navigation step: select `sel`, then (`maximized`) widen the maximization to it or follow
+   * it, and tell the view. `stack`: the expansions to keep (selecting clears them).
+   */
+  private navigate(sel: Selection, maximized?: "widen" | "follow", stack?: Selection[]): void {
+    this.select(sel, false);
+    if (stack) this.expandStack = stack;
+    if (maximized === "widen") this.widenMaximized();
+    else if (maximized === "follow") this.followMaximized();
+    this.emit("selection");
+  }
+
   private goParent(): void {
     const up = this.parentOf(this.selection);
     if (!up) return;
-    this.select({ id: up.id }, false);
-    this.widenMaximized();
-    this.emit("selection");
+    this.navigate({ id: up.id }, "widen");
   }
 
   /** Select the root of the tree holding the selection (main, or a floating window's). */
   private goRoot(): void {
     const root = this.tree();
     if (this.selection.id === root.id && !this.selection.range) return;
-    this.select({ id: root.id }, false);
-    this.widenMaximized(); // (the main root clears the maximization: top level)
-    this.emit("selection");
+    this.navigate({ id: root.id }, "widen"); // (the main root clears the maximization: top level)
   }
 
   private goChild(): void {
     const child = this.childOf(this.selection);
     if (!child) return;
-    this.select({ id: child.id }, false);
-    this.emit("selection");
+    this.navigate({ id: child.id });
   }
 
   /**
@@ -1672,8 +1685,7 @@ export class Workspace {
     if (n && isCell(n) && !this.selection.range) return false;
     const last = this.lastPane && this.node(this.lastPane);
     if (!last || !isCell(last)) return false;
-    this.select({ id: last.id }, false);
-    this.emit("selection");
+    this.navigate({ id: last.id });
     return true;
   }
 
@@ -1687,15 +1699,10 @@ export class Workspace {
       // takes us instead. (The boundary map is one window's geometry: stay out of it.)
       if (sideAxis[side] !== "row") return;
       const across = this.nextWindow(side);
-      if (!across) return;
-      this.select(across, false);
-      this.followMaximized();
-      this.emit("selection");
+      if (across) this.navigate(across, "follow");
       return;
     }
-    this.select(target, false);
-    this.followMaximized();
-    this.emit("selection");
+    this.navigate(target, "follow");
   }
 
   /** Swap the selected pane with the one on a side. The opposite swap undoes it exactly. */
@@ -1748,8 +1755,7 @@ export class Workspace {
       if (!r || !adjacent(r)) continue;
       const ov = overlap(r);
       if (ov <= EPS) continue;
-      const [lo, hi] = horizontal ? [r.y, r.y + r.h] : [r.x, r.x + r.w];
-      const score = ov + (lo <= center && center < hi ? 10 : 0);
+      const score = horizontal ? facing(ov, r.y, r.y + r.h, center) : facing(ov, r.x, r.x + r.w, center);
       if (!best || score > best.score) best = { id: p.id, score };
     }
     return best && { id: best.id };
@@ -1782,7 +1788,7 @@ export class Workspace {
       if (!r || Math.abs((enter === "left" ? r.x : r.x + r.w) - edge) > EPS) continue;
       const ov = Math.min(r.y + r.h, R.y + R.h) - Math.max(r.y, R.y);
       if (ov <= EPS) continue;
-      const hit = { id: p.id, score: ov + (r.y <= center && center < r.y + r.h ? 10 : 0) };
+      const hit = { id: p.id, score: facing(ov, r.y, r.y + r.h, center) };
       if (!cell || hit.score > cell.score) cell = hit;
       if (p.type === "pane" && (!pane || hit.score > pane.score)) pane = hit;
     }
@@ -1817,21 +1823,14 @@ export class Workspace {
 
   private commitExpand(sel: Selection): void {
     const prev = this.selection;
-    const stack = this.expandStack;
-    this.select(sel, false);
-    this.expandStack = [...stack, prev];
-    this.widenMaximized();
-    this.emit("selection");
+    this.navigate(sel, "widen", [...this.expandStack, prev]);
   }
 
   /** Undo the last expansion. */
   private unexpand(): void {
     const prev = this.expandStack.pop();
     if (!prev || !this.node(prev.id)) return;
-    const stack = this.expandStack;
-    this.select(prev, false);
-    this.expandStack = stack;
-    this.emit("selection");
+    this.navigate(prev, undefined, this.expandStack);
   }
 
   // -------------------------------------------------------------------------

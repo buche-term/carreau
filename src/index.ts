@@ -11,15 +11,11 @@ export const VERSION: string = __CARREAU_VERSION__;
 export * from "./actions";
 export * from "./cells";
 export * from "./colors";
-export * from "./complex";
 export * from "./dnd";
-export * from "./geometry";
 export * from "./keyboard";
-export * from "./kinds";
 export * from "./menus";
-export * from "./model";
+export * from "./model"; // (and what it re-exports: types, geometry, kinds, tree, complex)
+export * from "./names";
 export * from "./prompt";
-export * from "./tree";
-export * from "./types";
 export * from "./view";
 export * from "./workspace";

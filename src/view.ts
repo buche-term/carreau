@@ -5,6 +5,7 @@
 import { ActionRef, ActionRegistry, FALLBACK_FLOAT, carreauActions } from "./actions";
 import { cellAccent } from "./colors";
 import { MenuAction, MenuSpec, PANE_MENU, TAB_MENU } from "./menus";
+import { randomName } from "./names";
 import { DndHost, DragDrop, LINK_PATHS } from "./dnd";
 import {
   Ctx,
@@ -105,17 +106,48 @@ export function registerRenderer(type: LayoutNode["type"], r: NodeRenderer): voi
 const MANAGED = new WeakSet<Node>();
 
 /**
+ * Elements kept across renders by key, each with what the store keeps beside it. One that
+ * a render doesn't ask for goes away after it (`sweep`).
+ */
+class Kept<R extends { el: HTMLElement }> {
+  protected recs = new Map<string, R>();
+  private seen = new Set<string>();
+
+  /** The record for `key` (made by `make` the first time), asked for by this render. */
+  protected use(key: string, make: () => R): R {
+    this.seen.add(key);
+    let rec = this.recs.get(key);
+    if (!rec) {
+      rec = make();
+      MANAGED.add(rec.el);
+      this.recs.set(key, rec);
+    }
+    return rec;
+  }
+
+  /** What to do once a record's element is gone. */
+  protected gone(_rec: R): void {}
+
+  /** Remove the elements not asked for since the last sweep. */
+  sweep(): void {
+    for (const [key, rec] of this.recs)
+      if (!this.seen.has(key)) {
+        rec.el.remove();
+        this.recs.delete(key);
+        this.gone(rec);
+      }
+    this.seen.clear();
+  }
+}
+
+/**
  * Elements created once and moved around across renders, never recreated (their state, e.g.
  * an iframe's, or what's typed in a field, survives). One that isn't placed during a render
  * goes away after it.
  */
-class Persistent {
-  private els = new Map<string, HTMLElement>();
-  private disposers = new Map<string, () => void>();
-  private seen = new Set<string>();
-
+class Persistent extends Kept<{ el: HTMLElement; dispose?: () => void }> {
   get(key: string): HTMLElement | undefined {
-    return this.els.get(key);
+    return this.recs.get(key)?.el;
   }
 
   /**
@@ -123,28 +155,13 @@ class Persistent {
    * when it goes away.
    */
   place<E extends HTMLElement>(key: string, parent: HTMLElement, create: () => E, dispose?: () => void): E {
-    this.seen.add(key);
-    let el = this.els.get(key) as E | undefined;
-    if (!el) {
-      el = create();
-      MANAGED.add(el);
-      this.els.set(key, el);
-      if (dispose) this.disposers.set(key, dispose);
-    }
+    const el = this.use(key, () => ({ el: create(), dispose })).el as E;
     if (el.parentElement !== parent) move(parent, el);
     return el;
   }
 
-  /** Remove the elements not placed since the last sweep. */
-  sweep(): void {
-    for (const [key, el] of this.els)
-      if (!this.seen.has(key)) {
-        el.remove();
-        this.els.delete(key);
-        this.disposers.get(key)?.();
-        this.disposers.delete(key);
-      }
-    this.seen.clear();
+  protected override gone(rec: { dispose?: () => void }): void {
+    rec.dispose?.();
   }
 }
 
@@ -155,31 +172,15 @@ class Persistent {
  * inside. Their listeners read what they currently show through `cur` (the data of the latest
  * render). One that a render doesn't ask for goes away after it.
  */
-class Retained {
-  private recs = new Map<string, { el: HTMLElement; data: unknown }>();
-  private seen = new Set<string>();
-
+class Retained extends Kept<{ el: HTMLElement; data: unknown }> {
   get<E extends HTMLElement, D>(key: string, data: D, create: (cur: () => D) => E): E {
-    this.seen.add(key);
-    let rec = this.recs.get(key);
-    if (rec) rec.data = data;
-    else {
+    const rec = this.use(key, () => {
       const r: { el: HTMLElement; data: unknown } = { el: null!, data };
       r.el = create(() => r.data as D);
-      MANAGED.add(r.el);
-      this.recs.set(key, (rec = r));
-    }
+      return r;
+    });
+    rec.data = data;
     return rec.el as E;
-  }
-
-  /** Remove the elements not asked for since the last sweep. */
-  sweep(): void {
-    for (const [key, rec] of this.recs)
-      if (!this.seen.has(key)) {
-        rec.el.remove();
-        this.recs.delete(key);
-      }
-    this.seen.clear();
   }
 }
 
@@ -380,7 +381,7 @@ export class View implements DndHost {
         const node = paneEl && this.ws.node(paneEl.dataset.id!);
         if (node?.type !== "pane") return;
         e.preventDefault();
-        this.dnd.arm(e, { kind: "pane", paneId: node.id }, node.tabs[node.active]?.title ?? "pane", paneEl!, paneEl!);
+        this.dragPane(e, node, paneEl!, paneEl!);
       },
       { capture: true },
     );
@@ -485,6 +486,11 @@ export class View implements DndHost {
   }
 
   /** Where a pane floated out of the layout appears: its rect at 80%, centered on it. */
+  /** Where a new window goes, over a pane: `floatRect`, else near the workspace's corner. */
+  newWindowRect(paneId?: string | null): Rect {
+    return (paneId ? this.floatRect(paneId) : null) ?? FALLBACK_FLOAT;
+  }
+
   floatRect(paneId: string): Rect | null {
     const r = this.pxRect(paneId);
     if (!r) return null;
@@ -805,7 +811,7 @@ export class View implements DndHost {
           pressOnText = overText(l, e.clientX, e.clientY);
           if (pressOnText) return;
           const { node, el } = cur();
-          this.dnd.arm(e, { kind: "pane", paneId: node.id }, node.tabs[node.active]?.title ?? "pane", el);
+          this.dragPane(e, node, el);
         });
         return l;
       });
@@ -887,14 +893,7 @@ export class View implements DndHost {
    */
   private paneClose(node: PaneNode): HTMLElement {
     return this.parts.get(`cell-close:${node.id}`, node.id, (cur) => {
-      const c = span("carreau-cell-close");
-      c.title = "Close";
-      c.addEventListener("pointerdown", (e) => e.stopPropagation()); // not a drag, nor a selection
-      c.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.ws.closePane(cur());
-      });
-      return c;
+      return iconButton("carreau-cell-close", "Close", () => this.ws.closePane(cur()));
     });
   }
 
@@ -1000,7 +999,7 @@ export class View implements DndHost {
         y0 = e.clientY;
         moved = false;
         if (this.isBarCollapsed(node))
-          this.dnd.arm(e, { kind: "pane", paneId: node.id }, node.tabs[node.active]?.title ?? node.name ?? "pane", paneEl);
+          this.dragPane(e, node, paneEl);
         else e.stopPropagation();
       });
       // arm captured the pointer on the wedge: its moves come here even once it's elsewhere
@@ -1021,7 +1020,7 @@ export class View implements DndHost {
     if (node.name && !collapsed) {
       const name = this.parts.get(`pane-name:${node.id}`, data, (cur) => {
         const name = span("carreau-pane-name");
-        name.addEventListener("pointerdown", (e) => this.dnd.arm(e, { kind: "pane", paneId: cur().node.id }, cur().node.name ?? "pane", cur().paneEl));
+        name.addEventListener("pointerdown", (e) => this.dragPane(e, cur().node, cur().paneEl, undefined, cur().node.name));
         name.addEventListener("dblclick", () => this.editPaneName(cur().node.id));
         return name;
       });
@@ -1038,7 +1037,7 @@ export class View implements DndHost {
           space.title = "Drag to move this pane";
           space.addEventListener("pointerdown", (e) => {
             const { node, paneEl } = cur();
-            this.dnd.arm(e, { kind: "pane", paneId: node.id }, node.tabs[node.active]?.title ?? node.name ?? "pane", paneEl);
+            this.dragPane(e, node, paneEl);
           });
           return space;
         }),
@@ -1170,14 +1169,7 @@ export class View implements DndHost {
     else if (this.ws.canCloseTab(t.id))
       kids.push(
         this.parts.get(`tab-close:${key}`, t.id, (cur) => {
-          const close = span("carreau-tab-close");
-          close.title = "Close tab";
-          close.addEventListener("pointerdown", (e) => e.stopPropagation()); // not a drag
-          close.addEventListener("click", (e) => {
-            e.stopPropagation(); // not an activation
-            this.ws.closeTab(cur());
-          });
-          return close;
+          return iconButton("carreau-tab-close", "Close tab", () => this.ws.closeTab(cur()));
         }),
       );
     syncChildren(tab, kids);
@@ -1190,15 +1182,9 @@ export class View implements DndHost {
    */
   private closingSpinner(tabId: string, where: string): HTMLElement {
     return this.parts.get(`closing:${where}`, tabId, (cur) => {
-      const s = span("carreau-closing");
-      s.title = "Closing… click to force close";
+      const s = iconButton("carreau-closing", "Closing… click to force close", () => this.ws.forceClose(cur()));
       // Made again where it moves (e.g. to the strip): keep the rotation in phase with the clock.
       s.style.setProperty("--phase", `-${performance.now() % 900}ms`);
-      s.addEventListener("pointerdown", (e) => e.stopPropagation()); // not a drag
-      s.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.ws.forceClose(cur());
-      });
       return s;
     });
   }
@@ -1324,11 +1310,19 @@ export class View implements DndHost {
     this.showMenu(this.opts.menus?.tab ?? TAB_MENU, { node: node.id, tab: t.id }, { left: e.clientX - b.left, top: e.clientY - b.top });
   }
 
+  /**
+   * Start dragging a pane, from one of its handles (its strip, its name, its tab bar's empty
+   * space...). Its label: `label`, else its active tab's title, else its name.
+   */
+  private dragPane(e: PointerEvent, node: PaneNode, sourceEl: HTMLElement, capturerEl?: HTMLElement, label?: string): void {
+    this.dnd.arm(e, { kind: "pane", paneId: node.id }, label ?? node.tabs[node.active]?.title ?? node.name ?? "pane", sourceEl, capturerEl);
+  }
+
   /** Pull a tab out of its pane into a floating window of its own (all of a pane's tabs at
    *  once float the pane itself, as a drop of them all does). */
   floatTab(node: PaneNode, t: Tab): void {
     const result = this.ws.tryDrop({ kind: "tab", tabId: t.id }, { kind: "float", paneId: node.id });
-    if (result) this.ws.commitDrop(result, undefined, this.floatRect(node.id) ?? FALLBACK_FLOAT);
+    if (result) this.ws.commitDrop(result, undefined, this.newWindowRect(node.id));
   }
 
   /**
@@ -1474,7 +1468,7 @@ export class View implements DndHost {
 
   /** Group the selection under a random name, then edit the new tab's title in place. */
   groupAndName(selection?: Selection): void {
-    if (!this.ws.group(randomWord(), selection)) return;
+    if (!this.ws.group(randomName(), selection)) return;
     const holder = this.ws.node(this.ws.selection.id);
     if (holder?.type !== "pane") return;
     // A group you asked for shows its name: its bar starts open, pinned (its single tab being
@@ -1896,6 +1890,21 @@ function toEnd(el: HTMLElement): void {
   else el.scrollTop = el.scrollHeight;
 }
 
+/**
+ * A small button (a span, styled by `cls`): a click runs `run`, and neither starts a drag or
+ * a selection nor reaches what the button is in (a tab, a pane).
+ */
+function iconButton(cls: string, title: string, run: () => void): HTMLElement {
+  const el = span(cls);
+  el.title = title;
+  el.addEventListener("pointerdown", (e) => e.stopPropagation());
+  el.addEventListener("click", (e) => {
+    e.stopPropagation();
+    run();
+  });
+  return el;
+}
+
 /** The link icon between merged tabs. */
 function linkIcon(): HTMLElement {
   const el = Object.assign(document.createElement("span"), { className: "carreau-tab-link", title: "Merged: drag to move them together" });
@@ -1909,10 +1918,4 @@ function updateTabShadows(scroller: HTMLElement): void {
   const max = scroller.scrollWidth - scroller.clientWidth;
   wrap.classList.toggle("more-left", scroller.scrollLeft > 1);
   wrap.classList.toggle("more-right", scroller.scrollLeft < max - 1);
-}
-
-const WORDS = "amber basalt cedar delta ember fjord garnet harbor indigo juniper kestrel lagoon meadow nimbus orchid pebble quartz ridge saffron tundra umber willow zephyr lantern marble copper falcon maple".split(" ");
-
-function randomWord(): string {
-  return WORDS[Math.floor(Math.random() * WORDS.length)];
 }

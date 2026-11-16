@@ -6,7 +6,7 @@
 
 import { complexAt, registerComplex } from "./complex";
 import { kind, leafKind, registerKind, splitKind } from "./kinds";
-import { genId } from "./model";
+import { genId, pane } from "./model";
 import { walk } from "./tree";
 import { LayoutNode, PaneNode, SplitNode, Tab } from "./types";
 import { Workspace, registerOperand } from "./workspace";
@@ -185,7 +185,7 @@ export function submitPrompt(ws: Workspace, promptId: string, text: string): str
   const { submit } = promptOptions(ws);
   const tab = submit ? submit(text) : { id: genId("t"), title: text.slice(0, 24) || "…", content: text };
   if (!tab) return null;
-  const node: PaneNode = { type: "pane", id: genId("p"), weight: 1, tabs: [tab], active: 0 };
+  const node = pane([tab]);
   const result = ws.tryDrop({ kind: "external", node }, { kind: "between", splitId: col.id, index: col.children.length - 1 });
   if (!result) return null;
   // Merged: the cell comes from the member typing (the complex's active tab).

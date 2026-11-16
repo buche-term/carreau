@@ -390,7 +390,9 @@ function resolveNear(root: LayoutNode, subject: DragSubject, target: DropTarget 
 }
 
 /** The tabs a tab or complex subject drags, where they are (a complex: its members' run). */
-function draggedTabs(root: LayoutNode, subject: DragSubject): { pane: PaneNode; index: number; tabs: Tab[] } | null {
+/** The dragged tabs, and their pane: a tab, or a complex's tabs (in a tree, or in any of several). */
+export function draggedTabs(root: LayoutNode | LayoutNode[], subject: DragSubject): { pane: PaneNode; index: number; tabs: Tab[] } | null {
+  if (Array.isArray(root)) return root.map((r) => draggedTabs(r, subject)).find(Boolean) ?? null;
   if (subject.kind === "tab") {
     const ft = findTab(root, subject.tabId);
     return ft && { pane: ft.pane, index: ft.index, tabs: [ft.pane.tabs[ft.index]] };
@@ -459,7 +461,7 @@ export function applyDropRaw(root: SplitNode, subject: DragSubject, target: Drop
     }
     if (!d || d.pane !== p) return null; // only over its own pane
     const active = detachTabs(d);
-    const floated: PaneNode = { type: "pane", id: genId("p"), weight: 1, tabs: d.tabs, active };
+    const floated: PaneNode = { ...pane(d.tabs), active };
     return { paneId: floated.id, floated };
   }
 
@@ -510,7 +512,7 @@ export function applyDropRaw(root: SplitNode, subject: DragSubject, target: Drop
     const active = detachTabs(d);
     // Its pane, emptied, goes: beside it is where it already is.
     if (vanishes(d.pane) && target.kind === "side" && target.targetId === d.pane.id) return null;
-    moving = { type: "pane", id: genId("p"), weight: 1, tabs: d.tabs, active };
+    moving = { ...pane(d.tabs), active };
   }
 
   // 2. Insert.

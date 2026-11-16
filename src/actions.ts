@@ -7,8 +7,8 @@
 //
 // (No DOM at import time: hosts can load this without the view.)
 
-import { find, findTab, kind, panes } from "./model";
-import type { LayoutNode, PaneNode, Side, Tab } from "./model";
+import { DIRECTION_SIDE, find, findTab, kind, panes } from "./model";
+import type { Compass, LayoutNode, PaneNode, Tab } from "./model";
 import type { View } from "./view";
 import type { Selection, Workspace } from "./workspace";
 
@@ -164,9 +164,8 @@ export interface CarreauActionContext {
 /** Carreau's layout actions (keys and menus run them; a host may wrap them in its own registry). */
 export const carreauActions = new ActionRegistry<CarreauActionContext>();
 
-type Dir = "left" | "right" | "up" | "down";
+type Dir = Compass;
 const DIR: readonly Dir[] = ["left", "right", "up", "down"];
-const SIDE: Record<Dir, Side> = { left: "left", right: "right", up: "top", down: "bottom" };
 const CAP: Record<Dir, string> = { left: "Left", right: "Right", up: "Up", down: "Down" };
 /** Where a direction points, in a sentence: "to the left", "above". */
 const where = (t: unknown): string => ({ left: "to the left", right: "to the right", up: "above", down: "below" })[t as Dir] ?? String(t);
@@ -512,20 +511,20 @@ carreauActions.define({
     if (a.target === "float") {
       if (node !== undefined) {
         ws.select({ id: node }, false);
-        ws.spawnFloat(view.floatRect(node) ?? FALLBACK_FLOAT);
+        ws.spawnFloat(view.newWindowRect(node));
         return;
       }
       // Where the focused cell is (80% of it, centered), or near the workspace's corner.
       const n = operand(ws);
       const pane = n && (n.type === "pane" ? n.id : ws.descend(n));
-      ws.spawnFloat((pane ? view.floatRect(pane) : null) ?? FALLBACK_FLOAT);
+      ws.spawnFloat(view.newWindowRect(pane));
       return;
     }
     const dir = a.target as Dir;
     if (node !== undefined) ws.select({ id: node }, false);
     // Into a neighbour's tabs: if there is none on that side, where it would be.
     if (a.into) ws.spawn({ split: "tab", base: dir, force: true });
-    else ws.spawn({ split: SIDE[dir] });
+    else ws.spawn({ split: DIRECTION_SIDE[dir] });
   },
 });
 carreauActions.alias("insertInto", { id: "insert", args: { target: "tab" } });
@@ -543,7 +542,7 @@ carreauActions.define({
   params: { ...dirParam, into: { values: [true, false], default: false } },
   run({ ws }, a) {
     const dir = a.target as Dir;
-    ws.moveTab(a.into ? { split: "tab", base: dir, force: true } : { split: SIDE[dir] });
+    ws.moveTab(a.into ? { split: "tab", base: dir, force: true } : { split: DIRECTION_SIDE[dir] });
   },
 });
 for (const d of DIR) {

@@ -9,6 +9,11 @@ export const sideAxis: Record<Side, Orientation> = { left: "row", right: "row", 
 export const sideIsStart: Record<Side, boolean> = { left: true, top: true, right: false, bottom: false };
 export const opposite: Record<Side, Side> = { left: "right", right: "left", top: "bottom", bottom: "top" };
 
+/** A direction, as actions and keys name it (up, not top). */
+export type Compass = "left" | "right" | "up" | "down";
+/** A direction's side: up is the top, down the bottom. */
+export const DIRECTION_SIDE: Record<Compass, Side> = { left: "left", right: "right", up: "top", down: "bottom" };
+
 /** The coordinate of a rect's edge on a side. */
 export function edge(r: Rect, side: Side): number {
   return side === "left" ? r.x : side === "right" ? r.x + r.w : side === "top" ? r.y : r.y + r.h;
