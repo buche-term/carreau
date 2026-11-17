@@ -1,6 +1,6 @@
 {
   "name": "carreau",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "A draggable, keyboard-navigable tiling workspace (panes, tabs, groups, prompts) for the web. No dependencies, no framework.",
   "type": "module",
   "license": "MIT",
