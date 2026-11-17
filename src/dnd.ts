@@ -3,6 +3,7 @@
 
 import { grey } from "./colors";
 import {
+  activeGroup,
   DragSubject,
   DropTarget,
   Entry,
@@ -120,6 +121,8 @@ interface Zones {
   rect: Rect;
   sides: Partial<Record<Side, Choice>>;
   centers: { kind: "swap" | "float" | "tab" | "link"; choice: Choice; cx: number; cy: number; r: number }[];
+  /** An empty pane: anywhere in it is its one center choice (into it), never a split beside it. */
+  whole?: boolean;
 }
 
 export interface DragState {
@@ -372,6 +375,8 @@ export class DragDrop {
     // scroller, where there's no cell): the pane holding it, whose zones the space replaces.
     let hover: string | null = null;
     let space: HTMLElement | null = null;
+    /** Over the hovered pane's tab bar or wedge (its drops are its own). */
+    let chrome = false;
     for (const el of document.elementsFromPoint(ev.clientX, ev.clientY)) {
       const inner = (el as HTMLElement).closest?.(".carreau-scroll, .carreau-pane") as HTMLElement | null;
       if (inner?.classList.contains("carreau-scroll") && host.el.contains(inner)) {
@@ -384,14 +389,37 @@ export class DragDrop {
         const body = (el as HTMLElement).closest(".carreau-body");
         if (body?.parentElement === p && body.classList.contains("shows-group")) break;
         hover = p.dataset.id!;
+        chrome = (el as HTMLElement).closest(".carreau-tabbar, .carreau-wedge")?.parentElement === p;
         break;
       }
     }
     if (space) hover = this.ws.index().holder(space.dataset.scroll ?? space.dataset.id!)?.id ?? null;
+    // The body of a pane showing a group that is just an empty pane (its rim, around the
+    // group): that empty pane, the whole of it.
+    let rim: Rect | null = null;
+    const shown = hover && !chrome ? this.ws.node(hover) : null;
+    const inner = shown?.type === "pane" ? activeGroup(shown)?.children[0] : undefined;
+    if (shown && inner?.type === "pane" && !inner.tabs.length) {
+      rim = this.host.visRect(shown.id);
+      hover = inner.id;
+    }
     if (hover !== d.hoverPane) {
       d.hoverPane = hover;
       d.tabBar = hover ? this.tabBar(hover) : null;
       d.zones = hover ? this.zones(this.ws.index(), hover) : null;
+    }
+
+    // Over an empty pane (or the rim around it), it takes what's dropped wherever it is: no
+    // line there, no edge third.
+    if (d.zones?.whole && (inRect(d.zones.rect, px, py) || (rim && inRect(rim, px, py)))) {
+      d.near = null;
+      d.inCenter = true;
+      d.active = d.zones.centers[0].choice;
+      if (d.minis) d.minis = null;
+      this.waitForMinis(null);
+      this.tabDwell(ev);
+      this.draw();
+      return;
     }
 
     // Priority: the line under the cursor (its main choice: the outermost one there; the others
@@ -413,7 +441,7 @@ export class DragDrop {
         [["left", fx], ["right", 1 - fx], ["top", fy], ["bottom", 1 - fy]] as [Side, number][]
       ).filter(([, f]) => f < 1 / 3);
       // The center icons first: side by side, they can reach an edge third in a narrow pane.
-      const onIcon = Z.centers.find((c) => Math.hypot(px - c.cx, py - c.cy) <= c.r);
+      const onIcon = Z.whole ? Z.centers[0] : Z.centers.find((c) => Math.hypot(px - c.cx, py - c.cy) <= c.r);
       if (onIcon) {
         d.inCenter = true;
         d.active = onIcon.choice;
@@ -677,12 +705,18 @@ export class DragDrop {
       return result && { target, result, span: [0, 0] };
     };
     const sides: Zones["sides"] = {};
-    for (const side of SIDES) sides[side] = this.zoneSide(e, side) ?? undefined;
-    // Center icons. Over its own pane: float the dragged thing. Elsewhere: swap, plus a tab
-    // icon to add the dragged tabs at its end (for an empty pane: into it).
     const s = this.state!.subject;
     const st = this.draggedTabs();
     const own = (s.kind === "pane" && s.paneId === paneId) || st?.pane === pane;
+    // An empty pane (e.g. one offering what can go in it): what's dropped anywhere on it goes
+    // into it, taking its place, as on its tab icon; no splitting beside it, no swapping.
+    if (!pane.tabs.length && !own) {
+      const c = choice({ kind: "tab", paneId, index: 0 });
+      if (c) return { rect, sides, centers: [{ kind: "tab", choice: c, cx: rect.x + rect.w / 2, cy: rect.y + rect.h / 2, r: ICON_R }], whole: true };
+    }
+    for (const side of SIDES) sides[side] = this.zoneSide(e, side) ?? undefined;
+    // Center icons. Over its own pane: float the dragged thing. Elsewhere: swap, plus a tab
+    // icon to add the dragged tabs at its end.
     const wanted: [Zones["centers"][number]["kind"], DropTarget][] = own
       ? [["float", { kind: "float", paneId }]]
       : [

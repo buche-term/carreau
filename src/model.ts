@@ -59,6 +59,17 @@ export function groupPane(title: string, root: LayoutNode, weight: number): Pane
   };
 }
 
+/**
+ * A group tab named `title`, its layout `body` — by default, an empty pane that stays when
+ * empty (`keep`): a group to fill later, by dropping tabs into it (the host's `renderEmpty`
+ * shows in it meanwhile).
+ */
+export function groupTab(title: string, body?: LayoutNode): Tab {
+  const root = body ?? { ...pane([]), keep: true };
+  root.weight = 1;
+  return { id: genId("t"), title, group: slot(root) };
+}
+
 // ---------------------------------------------------------------------------
 // Serialization
 

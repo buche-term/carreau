@@ -1505,8 +1505,9 @@ export class View implements DndHost {
   }
 
   /** Group the selection under a random name, then edit the new tab's title in place. */
-  groupAndName(selection?: Selection): void {
-    if (!this.ws.group(randomName(), selection)) return;
+  groupAndName(selection?: Selection | { tab: string }): void {
+    const name = randomName();
+    if (!(selection && "tab" in selection ? this.ws.groupTab(name, selection.tab) : this.ws.group(name, selection))) return;
     const holder = this.ws.node(this.ws.selection.id);
     if (holder?.type !== "pane") return;
     // (Its bar is full: a lone group tab keeps it, see `barMode`; and editing holds it open.)
@@ -1586,10 +1587,17 @@ export class View implements DndHost {
     if (n?.type !== "pane") return;
     // A pane showing a group with a focus child (e.g. a prompt-column's prompt): into it.
     const root = activeGroup(n)?.children[0];
-    const target = root && kind(root).focusChild?.(root);
+    // (A group holding just an empty pane, e.g. a new one: into that pane, to what it shows.)
+    const target = root && (kind(root).focusChild?.(root) ?? (root.type === "pane" && !root.tabs.length ? root : null));
     if (target) {
       this.ws.select({ id: target.id });
       return this.commitFocus();
+    }
+    // An empty pane: the host's element for it (`renderEmpty`), if it takes the focus.
+    if (!n.tabs.length) {
+      const own = this.persisted(`empty:${n.id}`);
+      if (own && !own.contains(document.activeElement)) own.focus({ preventScroll: true });
+      return;
     }
     const tab = n.tabs[n.active];
     const shown = n.tabs[shownIndex(n)];

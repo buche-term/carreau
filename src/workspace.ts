@@ -5,6 +5,7 @@ import { Cell, Placer } from "./cells";
 import {
   Compass,
   pane as paneOf,
+  slot,
   DIRECTION_SIDE,
   afterActive,
   DragSubject,
@@ -1391,6 +1392,29 @@ export class Workspace {
         holderId = holder.id;
       },
       () => holderId,
+    );
+  }
+
+  /**
+   * Group a single tab: in its place, among its pane's other tabs, a group tab named `name`
+   * whose layout is a pane holding just that tab. The tab's pane is selected, showing the
+   * group (e.g. to name it). A pane's only tab: the pane is grouped (as `group`).
+   */
+  groupTab(name: string, tabId: string): boolean {
+    const at = this.findTab(tabId);
+    if (!at) return false;
+    if (at.pane.tabs.length === 1) return this.group(name, { id: at.pane.id });
+    const paneId = at.pane.id;
+    return this.change(
+      (forest) => {
+        const ft = findTab(forest, tabId);
+        if (!ft) return false;
+        const tab = ft.pane.tabs[ft.index];
+        delete tab.link; // (out of its complex: it's alone in its pane now)
+        ft.pane.tabs[ft.index] = { id: genId("t"), title: name, group: slot(paneOf([tab])) };
+        ft.pane.active = ft.index;
+      },
+      () => paneId,
     );
   }
 

@@ -178,12 +178,19 @@ function operand(ws: Workspace): LayoutNode | null {
   return op && !op.range ? ws.node(op.id) : null;
 }
 
-/** If a prompt is selected, a selection of its column. */
-function promptColumnSelection(ws: Workspace): Selection | null {
+/**
+ * If a prompt is selected, the whole tab its column is: the group tab holding the column (as
+ * if that tab were selected). A column that isn't a group's root: the column itself.
+ */
+function promptTabSelection(ws: Workspace): Selection | { tab: string } | null {
   const sel = ws.selection;
   if (sel.range || ws.node(sel.id)?.type !== "prompt") return null;
-  const col = ws.index().parent(sel.id);
-  return col ? { id: col.id } : null;
+  const idx = ws.index();
+  const col = idx.parent(sel.id);
+  if (!col) return null;
+  const holder = idx.holder(col.id);
+  const tab = holder?.type === "pane" ? holder.tabs.find((t) => t.group?.children[0]?.id === col.id) : undefined;
+  return tab ? { tab: tab.id } : { id: col.id };
 }
 
 /**
@@ -296,9 +303,9 @@ carreauActions.define({
   categories: ["layout"],
   run(ctx) {
     // Group now, then edit the new tab's title in place. From a prompt, it groups the
-    // prompt's column, not the operand.
+    // whole tab (the pane holding the prompt's column), not the operand (the cell above).
     if (ctx.node !== undefined) ctx.view.groupAndName({ id: ctx.node });
-    else ctx.view.groupAndName(promptColumnSelection(ctx.ws) ?? undefined);
+    else ctx.view.groupAndName(promptTabSelection(ctx.ws) ?? undefined);
   },
 });
 
